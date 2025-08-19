@@ -168,13 +168,6 @@
       "dependencies": {},
       "url": "https://packages.unity.com"
     },
-    "com.unity.nuget.newtonsoft-json": {
-      "version": "3.2.1",
-      "depth": 0,
-      "source": "registry",
-      "dependencies": {},
-      "url": "https://packages.unity.com"
-    },
     "com.unity.test-framework": {
       "version": "1.1.33",
       "depth": 0,
@@ -225,6 +218,13 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
+    },
+    "thanhdv.newtonsoft.json": {
+      "version": "https://github.com/ThanhDang143/ThanhDV.Newtonsoft.Json.git?path=/Assets/Packages/ThanhDV.Newtonsoft.Json",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "3bbe9523b6571cee2d12bf0c94511cffd7cb6de8"
     },
     "com.unity.modules.ai": {
       "version": "1.0.0",

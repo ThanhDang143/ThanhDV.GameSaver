@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ThanhDV.GameSaver.IO;
+using System.Threading.Tasks;
 
-namespace ThanhDV.GameSaver
+namespace ThanhDV.GameSaver.Saver
 {
     public class GameSaver : MonoBehaviour
     {
@@ -49,7 +51,11 @@ namespace ThanhDV.GameSaver
         #endregion
 
         [Header("File Config")]
-        [SerializeField] private string fileName;
+        [SerializeField, Tooltip("Include extension.")] private string fileName;
+        [SerializeField] private bool useEncryption;
+
+        [Header("Debug")]
+        [SerializeField] private bool initializeDataIfNull;
 
         private GameData gameData;
         private List<ISavable> savableObjs;
@@ -57,9 +63,9 @@ namespace ThanhDV.GameSaver
 
         private void Start()
         {
-            fileIO = new(Application.persistentDataPath, fileName);
+            fileIO = new(Application.persistentDataPath, fileName, useEncryption);
             savableObjs = FindSavableObjs();
-            LoadGame();
+            _ = LoadGame();
         }
 
         public void NewGame()
@@ -69,6 +75,12 @@ namespace ThanhDV.GameSaver
 
         public void SaveGame()
         {
+            if (gameData == null)
+            {
+                Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before SaveGame()!!!</color>");
+                return;
+            }
+
             for (int i = 0; i < savableObjs.Count; i++)
             {
                 savableObjs[i].SaveData(ref gameData);
@@ -77,12 +89,19 @@ namespace ThanhDV.GameSaver
             fileIO.Save(gameData);
         }
 
-        public void LoadGame()
+        public async Task LoadGame()
         {
+            gameData = await fileIO.Load<GameData>();
+
+            if (gameData == null || initializeDataIfNull)
+            {
+                NewGame();
+            }
+
             if (gameData == null)
             {
-                Debug.Log("<color=yellow>[GameSaver] No data was found. Create new default data!!!</color>");
-                NewGame();
+                Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()!!!</color>");
+                return;
             }
 
             for (int i = 0; i < savableObjs.Count; i++)
@@ -95,6 +114,11 @@ namespace ThanhDV.GameSaver
         {
             IEnumerable<ISavable> savableObjs = FindObjectsOfType<MonoBehaviour>().OfType<ISavable>();
             return new List<ISavable>(savableObjs);
+        }
+
+        private bool HasSaveData()
+        {
+            return gameData != null;
         }
 
         private void OnApplicationQuit()

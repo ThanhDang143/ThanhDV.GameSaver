@@ -1,4 +1,6 @@
-namespace ThanhDV.GameSaver
+using System.Threading.Tasks;
+
+namespace ThanhDV.GameSaver.Saver
 {
     public interface ISavable
     {

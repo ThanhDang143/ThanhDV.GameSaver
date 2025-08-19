@@ -1,6 +1,5 @@
-using System.Collections;
 using System.Collections.Generic;
-using ThanhDV.GameSaver;
+using ThanhDV.GameSaver.Saver;
 using UnityEngine;
 
 public class Tester : MonoBehaviour, ISavable
