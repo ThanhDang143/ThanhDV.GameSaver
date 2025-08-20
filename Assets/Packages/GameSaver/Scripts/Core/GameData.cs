@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace ThanhDV.GameSaver.Saver
+namespace ThanhDV.GameSaver.Core
 {
     [System.Serializable]
     public class GameData

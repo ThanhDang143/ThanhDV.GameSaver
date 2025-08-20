@@ -1,10 +1,10 @@
 using System.Threading.Tasks;
 
-namespace ThanhDV.GameSaver.Saver
+namespace ThanhDV.GameSaver.Core
 {
     public interface ISavable
     {
-        void SaveData(ref GameData data);
+        void SaveData(GameData data);
         void LoadData(GameData data);
     }
 }

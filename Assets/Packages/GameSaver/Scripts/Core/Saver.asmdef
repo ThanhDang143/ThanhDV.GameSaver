@@ -1,0 +1,17 @@
+{
+    "name": "Saver",
+    "rootNamespace": "ThanhDV.GameSaver",
+    "references": [
+        "GUID:e87150923f644184fbe7f20b50188945",
+        "GUID:645ee2492fce7534a97a04bbdca2eb30"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
