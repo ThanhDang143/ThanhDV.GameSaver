@@ -55,7 +55,7 @@ namespace ThanhDV.GameSaver.Core
         [SerializeField] private SaveSettings saveSettings;
 
         private string curProfileId;
-        private SaveData gameData;
+        private SaveData saveData;
         private readonly HashSet<ISavable> savableObjs = new();
         private IDataHandler dataHandler;
         private Coroutine autoSaveCoroutine;
@@ -96,18 +96,18 @@ namespace ThanhDV.GameSaver.Core
         private void Register(ISavable savable)
         {
             savableObjs.Add(savable);
-            if (gameData != null) savable.LoadData(gameData);
+            if (saveData != null) savable.LoadData(saveData);
         }
 
         private void Unregister(ISavable savable)
         {
             savableObjs.Remove(savable);
-            if (gameData != null) savable.SaveData(gameData);
+            if (saveData != null) savable.SaveData(saveData);
         }
 
         public void NewGame(string profileId = null)
         {
-            gameData = new SaveData();
+            saveData = new SaveData();
             string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
             SetProfileID(id);
 
@@ -116,7 +116,7 @@ namespace ThanhDV.GameSaver.Core
 
         public void SaveGame()
         {
-            if (gameData == null)
+            if (saveData == null)
             {
                 Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before SaveGame()!!!</color>");
                 return;
@@ -124,17 +124,49 @@ namespace ThanhDV.GameSaver.Core
 
             foreach (ISavable savable in savableObjs)
             {
-                savable.SaveData(gameData);
+                savable.SaveData(saveData);
             }
 
-            dataHandler.Write(gameData, curProfileId);
+            dataHandler.Write(saveData, curProfileId);
+        }
+
+        public async Task<T> LoadModule<T>() where T : class, ISaveData, new()
+        {
+            string moduleKey = typeof(T).Name;
+            saveData ??= new();
+
+            if (saveData.DataModules.TryGetValue(moduleKey, out ISaveData cachedData))
+            {
+                return cachedData as T;
+            }
+
+            T loadedData = await dataHandler.ReadModule<T>(curProfileId, moduleKey);
+            if (loadedData != null)
+            {
+                saveData.DataModules.TryAdd(moduleKey, loadedData);
+                return loadedData;
+            }
+
+            T newData = new();
+            saveData.DataModules.TryAdd(moduleKey, newData);
+            return newData;
         }
 
         public async Task LoadGame()
         {
-            gameData = await dataHandler.Read<SaveData>(curProfileId);
+            if (saveSettings.SaveAsSeparateFiles)
+            {
+                await LoadFromMultiFile();
+            }
+            else
+            {
+                await LoadFromSingleFile();
+            }
+        }
 
-            if (gameData == null)
+        private async Task LoadFromMultiFile()
+        {
+            if (saveData == null)
             {
                 if (saveSettings.CreateProfileOnFirstRun)
                 {
@@ -150,7 +182,39 @@ namespace ThanhDV.GameSaver.Core
 
             foreach (ISavable savable in savableObjs)
             {
-                savable.LoadData(gameData);
+                var savableType = saveData.GetType();
+                ISaveData data = await LoadModule<savableType>();
+                savable.LoadData(data);
+            }
+
+            Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");
+        }
+
+        private async Task LoadFromSingleFile()
+        {
+            saveData = await dataHandler.Read<SaveData>(curProfileId);
+
+            if (saveData == null)
+            {
+                if (saveSettings.CreateProfileOnFirstRun)
+                {
+                    NewGame(Constant.DEFAULT_PROFILE_ID);
+                    Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
+                }
+                else
+                {
+                    Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()!!!</color>");
+                    return;
+                }
+            }
+
+            foreach (ISavable savable in savableObjs)
+            {
+                string savableType = saveData.GetType().FullName;
+                if (saveData.DataModules.TryGetValue(savableType, out ISaveData data))
+                {
+                    savable.LoadData(data);
+                }
             }
 
             Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");

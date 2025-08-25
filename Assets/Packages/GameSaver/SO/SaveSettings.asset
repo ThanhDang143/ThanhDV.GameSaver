@@ -12,9 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3ea8ed9e07dbddc4393edfcf0cb2bc28, type: 3}
   m_Name: SaveSettings
   m_EditorClassIdentifier: 
+  createProfileOnFirstRun: 1
   useEncryption: 0
-  saveAsSeparateFiles: 0
+  saveAsSeparateFiles: 1
   fileName: Default
-  fileExtention: .tdv
+  fileExtension: .tdv
   enableAutoSave: 1
   autoSaveTime: 300

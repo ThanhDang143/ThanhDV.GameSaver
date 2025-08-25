@@ -63,6 +63,27 @@ namespace ThanhDV.GameSaver.Core
             }
         }
 
+        public async Task<T> ReadModule<T>(string profileId, string moduleKey, bool allowRestoreFromBackup = true) where T : class, ISaveData
+        {
+            if (!saveAsSeparateFiles)
+            {
+                Debug.Log("<color=yellow>[GameSaver] ReadModule is only supported when 'Save As Separate Files' mode is enabled!!!</color>");
+                return null;
+            }
+
+            string fileExtention = this.fileName.Split('.')[^1];
+            string moduleFileName = $"{moduleKey}.{fileExtention}";
+            string fullPath = Path.Combine(filePath, profileId, moduleFileName);
+
+            if (!File.Exists(fullPath))
+            {
+                Debug.Log($"<color=yellow>[GameSaver] Module '{moduleKey}' file not found for profile '{profileId}'.</color>");
+                return null;
+            }
+
+            return await ReadObject<T>(fullPath, allowRestoreFromBackup);
+        }
+
         public async Task<Dictionary<string, T>> ReadAll<T>() where T : class
         {
             Dictionary<string, T> profiles = new();

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace ThanhDV.GameSaver.Core
@@ -13,20 +14,31 @@ namespace ThanhDV.GameSaver.Core
             DataModules = new();
         }
 
-        public bool TryGetData<T>(out T data) where T : class, ISaveData, new()
+        public async Task<T> GetDataAsync<T>() where T : class, ISaveData, new()
+        {
+            ISaveData saveData = await GameSaver.Instance.LoadModule<T>();
+
+            if (saveData != null) return saveData as T;
+
+            Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
+            T data = new();
+            CreateData(data);
+            return data;
+        }
+
+        public T GetData<T>() where T : class, ISaveData, new()
         {
             string key = typeof(T).Name;
 
-            if (DataModules.TryGetValue(key, out ISaveData saveData))
+            if (DataModules.TryGetValue(key, out ISaveData savedData))
             {
-                data = saveData as T;
-                return true;
+                return savedData as T;
             }
 
             Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
-            data = new();
+            T data = new();
             CreateData(data);
-            return false;
+            return data;
         }
 
         public void CreateData<T>(T newData) where T : class, ISaveData, new()

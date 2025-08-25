@@ -54,9 +54,9 @@ public class Tester1 : MonoBehaviour, ISavable
         }
     }
 
-    public void LoadData(SaveData data)
+    public void LoadData(ISaveData data)
     {
-        if (!data.TryGetData(out Tester1Data testerData)) return;
+        if (data is not Tester1Data testerData) return;
 
         intData = testerData.IntData;
         floatData = testerData.FloatData;
@@ -70,9 +70,9 @@ public class Tester1 : MonoBehaviour, ISavable
         }
     }
 
-    public void SaveData(SaveData data)
+    public void SaveData(ISaveData data)
     {
-        if (!data.TryGetData(out Tester1Data testerData)) return;
+        if (data is not Tester1Data testerData) return;
 
         testerData.IntData = intData;
         testerData.FloatData = floatData;
