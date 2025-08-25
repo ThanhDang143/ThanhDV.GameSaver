@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using ThanhDV.GameSaver.DataHandler;
 using System.Threading.Tasks;
@@ -56,7 +55,7 @@ namespace ThanhDV.GameSaver.Core
         [SerializeField] private SaveSettings saveSettings;
 
         private string curProfileId;
-        private GameData gameData;
+        private SaveData gameData;
         private readonly HashSet<ISavable> savableObjs = new();
         private IDataHandler dataHandler;
         private Coroutine autoSaveCoroutine;
@@ -104,7 +103,7 @@ namespace ThanhDV.GameSaver.Core
 
         public void NewGame()
         {
-            gameData = new GameData();
+            gameData = new SaveData();
         }
 
         public void SaveGame()
@@ -125,7 +124,7 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task LoadGame()
         {
-            gameData = await dataHandler.Read<GameData>(curProfileId);
+            gameData = await dataHandler.Read<SaveData>(curProfileId);
 
             if (gameData == null)
             {
@@ -139,9 +138,9 @@ namespace ThanhDV.GameSaver.Core
             }
         }
 
-        public async Task<Dictionary<string, GameData>> LoadAll()
+        public async Task<Dictionary<string, SaveData>> LoadAll()
         {
-            Dictionary<string, GameData> gameDatas = await dataHandler.ReadAll<GameData>();
+            Dictionary<string, SaveData> gameDatas = await dataHandler.ReadAll<SaveData>();
             return gameDatas;
         }
 

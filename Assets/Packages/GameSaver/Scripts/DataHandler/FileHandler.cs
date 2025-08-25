@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -12,6 +13,10 @@ namespace ThanhDV.GameSaver.DataHandler
     {
         private const string BACKUP_EXTENSION = ".bak";
         private const string TEMP_EXTENSION = ".tmp";
+        private const int MAX_CONCURRENT_READS = 5;
+
+        private readonly object profileLock = new();
+        private readonly SemaphoreSlim readSemaphore = new(MAX_CONCURRENT_READS);
 
         private string filePath = "";
         private string fileName = "";
@@ -28,6 +33,8 @@ namespace ThanhDV.GameSaver.DataHandler
         {
             string fullPath = Path.Combine(filePath, profileId, fileName);
             T loadedData = null;
+
+            await readSemaphore.WaitAsync().ConfigureAwait(false);
             if (File.Exists(fullPath))
             {
                 try
@@ -46,7 +53,7 @@ namespace ThanhDV.GameSaver.DataHandler
                         dataToLoad = decryptedData;
                     }
 
-                    loadedData = JsonConvert.DeserializeObject<T>(dataToLoad);
+                    loadedData = JsonConvert.DeserializeObject<T>(dataToLoad, JsonUtilities.UnityJsonSettings);
                 }
                 catch (Exception e)
                 {
@@ -66,6 +73,10 @@ namespace ThanhDV.GameSaver.DataHandler
                     {
                         Debug.Log($"<color=red>[GameSaver] Fail to LOAD data with ID: {profileId}. Can not roll back or backup is also corrupt!!!</color>\n{e}");
                     }
+                }
+                finally
+                {
+                    readSemaphore.Release();
                 }
             }
 
@@ -108,14 +119,20 @@ namespace ThanhDV.GameSaver.DataHandler
 
         public async Task Write<T>(T data, string profileId) where T : class
         {
+            if (data == null) return;
+
             string fullPath = Path.Combine(filePath, profileId, fileName);
             string backupPath = fullPath + BACKUP_EXTENSION;
             string tempPath = fullPath + TEMP_EXTENSION;
 
-            try
+            lock (profileLock)
             {
                 string directoryName = Path.GetDirectoryName(fullPath);
                 Directory.CreateDirectory(directoryName);
+            }
+
+            try
+            {
 
                 string dataToSave = JsonConvert.SerializeObject(data, Formatting.Indented, JsonUtilities.UnityJsonSettings);
                 if (useEncryption)
@@ -188,7 +205,7 @@ namespace ThanhDV.GameSaver.DataHandler
 
                 FileInfo mostRecentFile = directory.EnumerateDirectories()
                     .SelectMany(dir => dir.EnumerateFiles("*", SearchOption.AllDirectories))
-                    .OrderByDescending(file => file.LastAccessTime)
+                    .OrderByDescending(file => file.LastWriteTimeUtc)
                     .FirstOrDefault();
 
                 return mostRecentFile?.Directory.Name;

@@ -55,30 +55,48 @@ public class Tester : MonoBehaviour, ISavable
         }
     }
 
-    public void LoadData(GameData data)
+    public void LoadData(SaveData data)
     {
-        intData = data.IntData;
-        floatData = data.FloatData;
+        TesterData testerData = data.TryGetData<TesterData>();
+
+        intData = testerData.IntData;
+        floatData = testerData.FloatData;
 
         dictionaryDataKey = new();
         dictionaryDataValue = new();
-        foreach (var pair in data.DictionaryData)
+        foreach (var pair in testerData.DictionaryData)
         {
             dictionaryDataKey.Add(pair.Key);
             dictionaryDataValue.Add(pair.Value);
         }
     }
 
-    public void SaveData(GameData data)
+    public void SaveData(SaveData data)
     {
-        data.IntData = intData;
-        data.FloatData = floatData;
+        TesterData testerData = data.TryGetData<TesterData>();
 
-        data.DictionaryData = new();
+        testerData.IntData = intData;
+        testerData.FloatData = floatData;
+
+        testerData.DictionaryData = new();
         int dictCount = dictionaryDataKey.Count > dictionaryDataValue.Count ? dictionaryDataValue.Count : dictionaryDataKey.Count;
         for (int i = 0; i < dictCount; i++)
         {
-            data.DictionaryData.Add(dictionaryDataKey[i], dictionaryDataValue[i]);
+            testerData.DictionaryData.Add(dictionaryDataKey[i], dictionaryDataValue[i]);
+        }
+    }
+
+    public class TesterData : ISaveData
+    {
+        public int IntData { get; set; }
+        public float FloatData { get; set; }
+        public Dictionary<string, Vector3> DictionaryData { get; set; }
+
+        public TesterData()
+        {
+            IntData = 0;
+            FloatData = 0f;
+            DictionaryData = new();
         }
     }
 }
