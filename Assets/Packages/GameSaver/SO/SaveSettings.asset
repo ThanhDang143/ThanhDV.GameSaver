@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: SaveSettings
   m_EditorClassIdentifier: 
   useEncryption: 0
-  fileName: Default.tdv
+  saveAsSeparateFiles: 0
+  fileName: Default
+  fileExtention: .tdv
   enableAutoSave: 1
   autoSaveTime: 300

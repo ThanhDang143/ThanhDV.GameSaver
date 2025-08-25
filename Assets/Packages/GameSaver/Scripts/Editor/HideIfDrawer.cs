@@ -3,8 +3,8 @@ using UnityEditor;
 using System.Reflection;
 using ThanhDV.GameSaver.CustomAttribute;
 
-[CustomPropertyDrawer(typeof(ShowIfAttribute))]
-public class ShowIfDrawer : PropertyDrawer
+[CustomPropertyDrawer(typeof(HideIfAttribute))]
+public class HideIfDrawer : PropertyDrawer
 {
     public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
     {
@@ -28,15 +28,16 @@ public class ShowIfDrawer : PropertyDrawer
 
     private bool ShouldShow(SerializedProperty property)
     {
-        ShowIfAttribute showIfAttr = attribute as ShowIfAttribute;
-
+        HideIfAttribute hideIfAttr = attribute as HideIfAttribute;
         object targetObject = property.serializedObject.targetObject;
 
-        FieldInfo conditionField = targetObject.GetType().GetField(showIfAttr.ConditionFieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        FieldInfo conditionField = targetObject.GetType()
+            .GetField(hideIfAttr.ConditionFieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
         if (conditionField != null && conditionField.FieldType == typeof(bool))
         {
-            return (bool)conditionField.GetValue(targetObject);
+            bool condition = (bool)conditionField.GetValue(targetObject);
+            return !condition;
         }
 
         return true;

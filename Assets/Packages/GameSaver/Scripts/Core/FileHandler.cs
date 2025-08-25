@@ -5,33 +5,103 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using ThanhDV.GameSaver.Helper;
 using UnityEngine;
 
-namespace ThanhDV.GameSaver.DataHandler
+namespace ThanhDV.GameSaver.Core
 {
     public class FileHandler : IDataHandler
     {
-        private const string BACKUP_EXTENSION = ".bak";
         private const string TEMP_EXTENSION = ".tmp";
         private const int MAX_CONCURRENT_READS = 5;
 
         private readonly object profileLock = new();
         private readonly SemaphoreSlim readSemaphore = new(MAX_CONCURRENT_READS);
 
-        private string filePath = "";
-        private string fileName = "";
-        private bool useEncryption = true;
+        private readonly string filePath = "";
+        private readonly string fileName = "";
+        private readonly bool useEncryption = true;
+        private readonly bool saveAsSeparateFiles = false;
 
-        public FileHandler(string _filePath, string _fileName, bool _useEncryption)
+        public FileHandler(string _filePath, string _fileName, bool _useEncryption, bool _saveAsSeparateFiles)
         {
             filePath = _filePath;
             fileName = _fileName;
             useEncryption = _useEncryption;
+            saveAsSeparateFiles = _saveAsSeparateFiles;
         }
 
         public async Task<T> Read<T>(string profileId, bool allowRestoreFromBackup = true) where T : class
         {
-            string fullPath = Path.Combine(filePath, profileId, fileName);
+            string profilePath = Path.Combine(filePath, profileId);
+
+            if (!Directory.Exists(profilePath))
+            {
+                Debug.Log("<color=yellow>[GameSaver] Save directory does not exist. No profiles to load!!!</color>");
+                return null;
+            }
+
+            if (saveAsSeparateFiles)
+            {
+                string fileExtention = fileName.Split('.')[^1];
+                SaveData saveData = new();
+                string[] files = Directory.GetFiles(profilePath, $"*.{fileExtention}");
+
+                foreach (string file in files)
+                {
+                    string moduleKey = Path.GetFileNameWithoutExtension(file);
+                    ISaveData moduleData = await ReadObject<ISaveData>(file, allowRestoreFromBackup);
+                    if (moduleData != null) saveData.DataModules.TryAdd(moduleKey, moduleData);
+                }
+
+                return saveData as T;
+            }
+            else
+            {
+                string fullPath = Path.Combine(profilePath, fileName);
+                return await ReadObject<T>(fullPath, allowRestoreFromBackup);
+            }
+        }
+
+        public async Task<Dictionary<string, T>> ReadAll<T>() where T : class
+        {
+            Dictionary<string, T> profiles = new();
+            if (!Directory.Exists(filePath))
+            {
+                Debug.Log("<color=yellow>[GameSaver] Save directory does not exist. No profiles to load!!!</color>");
+                return profiles;
+            }
+
+            IEnumerable<DirectoryInfo> directoryInfos = new DirectoryInfo(filePath).EnumerateDirectories();
+            var loadDataTasks = directoryInfos.Select(async dirInfo =>
+            {
+                string profileId = dirInfo.Name;
+                T data = await Read<T>(profileId);
+                return (profileId, data);
+            }).ToList();
+
+            var results = await Task.WhenAll(loadDataTasks);
+
+            foreach ((string profileId, T data) in results)
+            {
+                if (data != null)
+                {
+                    profiles.Add(profileId, data);
+                }
+                else
+                {
+                    Debug.Log($"<color=red>[GameSaver] Fail to LOAD data with ID: {profileId}!!!</color>");
+                }
+            }
+
+            return profiles;
+        }
+
+        private async Task<T> ReadObject<T>(string fullPath, bool allowRestoreFromBackup = true) where T : class
+        {
+            string profilePath = Path.GetDirectoryName(fullPath);
+            string profileId = new DirectoryInfo(profilePath).Name;
+
             T loadedData = null;
 
             await readSemaphore.WaitAsync().ConfigureAwait(false);
@@ -83,46 +153,39 @@ namespace ThanhDV.GameSaver.DataHandler
             return loadedData;
         }
 
-        public async Task<Dictionary<string, T>> ReadAll<T>() where T : class
+        public async Task Write(SaveData data, string profileId)
         {
-            Dictionary<string, T> profiles = new();
-            if (!Directory.Exists(filePath))
+            string profilePath = Path.Combine(filePath, profileId);
+
+            if (saveAsSeparateFiles)
             {
-                Debug.Log("<color=yellow>[GameSaver] Save directory does not exist. No profiles to load!!!</color>");
-                return profiles;
+                var writeTasks = data.DataModules.Select(kvp => WriteModule(kvp.Value, kvp.Key, profilePath));
+                await Task.WhenAll(writeTasks);
             }
-
-            IEnumerable<DirectoryInfo> directoryInfos = new DirectoryInfo(filePath).EnumerateDirectories();
-            var loadDataTasks = directoryInfos.Select(async dirInfo =>
+            else
             {
-                string profileId = dirInfo.Name;
-                T data = await Read<T>(profileId);
-                return (profileId, data);
-            }).ToList();
-
-            var results = await Task.WhenAll(loadDataTasks);
-
-            foreach ((string profileId, T data) in results)
-            {
-                if (data != null)
-                {
-                    profiles.Add(profileId, data);
-                }
-                else
-                {
-                    Debug.Log($"<color=red>[GameSaver] Fail to LOAD data with ID: {profileId}!!!</color>");
-                }
+                await WriteObject(data, fileName, profilePath);
             }
-
-            return profiles;
         }
 
-        public async Task Write<T>(T data, string profileId) where T : class
+        private async Task WriteModule(ISaveData data, string moduleKey, string profilePath)
         {
-            if (data == null) return;
+            string fileExtention = this.fileName.Split('.')[^1];
+            string fileName = $"{moduleKey}.{fileExtention}";
 
-            string fullPath = Path.Combine(filePath, profileId, fileName);
-            string backupPath = fullPath + BACKUP_EXTENSION;
+            await WriteObject(data, fileName, profilePath);
+        }
+
+        private async Task WriteObject(object data, string fileName, string profilePath)
+        {
+            if (data == null)
+            {
+                Debug.Log("<color=red>[GameSaver] Cannot save null data!!!</color>");
+                return;
+            }
+
+            string fullPath = Path.Combine(profilePath, fileName);
+            string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
             string tempPath = fullPath + TEMP_EXTENSION;
 
             lock (profileLock)
@@ -133,7 +196,6 @@ namespace ThanhDV.GameSaver.DataHandler
 
             try
             {
-
                 string dataToSave = JsonConvert.SerializeObject(data, Formatting.Indented, JsonUtilities.UnityJsonSettings);
                 if (useEncryption)
                 {
@@ -220,7 +282,7 @@ namespace ThanhDV.GameSaver.DataHandler
         public bool TryRollback(string savePath)
         {
             bool success = false;
-            string backupPath = savePath + BACKUP_EXTENSION;
+            string backupPath = savePath + Constant.FILE_BACKUP_EXTENTION;
             try
             {
                 if (File.Exists(backupPath))

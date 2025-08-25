@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 
-namespace ThanhDV.GameSaver.DataHandler
+namespace ThanhDV.GameSaver.Helper
 {
     /// <summary>
     /// AES-GCM (AEAD) encryption/decryption utility with PBKDF2 key derivation.

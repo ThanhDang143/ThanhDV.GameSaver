@@ -2,8 +2,9 @@
     "name": "Saver",
     "rootNamespace": "ThanhDV.GameSaver",
     "references": [
-        "GUID:e87150923f644184fbe7f20b50188945",
-        "GUID:645ee2492fce7534a97a04bbdca2eb30"
+        "GUID:645ee2492fce7534a97a04bbdca2eb30",
+        "GUID:03ef45ea72d7e2d4da0fe8ede356901e",
+        "GUID:0c4dd04ab2489a64492faf1a596f0840"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

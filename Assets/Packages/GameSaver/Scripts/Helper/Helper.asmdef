@@ -1,9 +1,7 @@
 {
-    "name": "DataHandler",
+    "name": "Helper",
     "rootNamespace": "ThanhDV.GameSaver",
-    "references": [
-        "GUID:0c4dd04ab2489a64492faf1a596f0840"
-    ],
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

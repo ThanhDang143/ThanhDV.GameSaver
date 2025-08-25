@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ThanhDV.GameSaver.DataHandler;
+using ThanhDV.GameSaver.Helper;
 using System.Threading.Tasks;
 using System.Collections;
 
@@ -75,12 +75,16 @@ namespace ThanhDV.GameSaver.Core
             _ = LoadGame();
 
             StartAutoSave();
+
+            Debug.Log("<color=green>[GameSaver] Initialized successfully.</color>");
+
         }
 
         private void InitializeDataHandler()
         {
             string fileName = string.IsNullOrEmpty(saveSettings.FileName) ? Constant.DEFAULT_FILE_NAME : saveSettings.FileName;
-            dataHandler = new FileHandler(Application.persistentDataPath, fileName, saveSettings.UseEncryption);
+            fileName += string.IsNullOrEmpty(saveSettings.FileExtension) ? Constant.DEFAULT_FILE_SAVE_EXTENSION : saveSettings.FileExtension;
+            dataHandler = new FileHandler(Application.persistentDataPath, fileName, saveSettings.UseEncryption, saveSettings.SaveAsSeparateFiles);
         }
 
         private void InitializeProfile()
@@ -101,9 +105,13 @@ namespace ThanhDV.GameSaver.Core
             if (gameData != null) savable.SaveData(gameData);
         }
 
-        public void NewGame()
+        public void NewGame(string profileId = null)
         {
             gameData = new SaveData();
+            string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
+            SetProfileID(id);
+
+            Debug.Log($"<color=green>[GameSaver] Created new game with profile: {id}!!!</color>");
         }
 
         public void SaveGame()
@@ -128,14 +136,24 @@ namespace ThanhDV.GameSaver.Core
 
             if (gameData == null)
             {
-                Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()!!!</color>");
-                return;
+                if (saveSettings.CreateProfileOnFirstRun)
+                {
+                    NewGame(Constant.DEFAULT_PROFILE_ID);
+                    Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
+                }
+                else
+                {
+                    Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()!!!</color>");
+                    return;
+                }
             }
 
             foreach (ISavable savable in savableObjs)
             {
                 savable.LoadData(gameData);
             }
+
+            Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");
         }
 
         public async Task<Dictionary<string, SaveData>> LoadAll()

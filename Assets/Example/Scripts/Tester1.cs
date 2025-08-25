@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using ThanhDV.GameSaver.Core;
 using UnityEngine;
 
-public class Tester : MonoBehaviour, ISavable
+public class Tester1 : MonoBehaviour, ISavable
 {
     [Space]
     [SerializeField] private int intData;
@@ -56,7 +56,7 @@ public class Tester : MonoBehaviour, ISavable
 
     public void LoadData(SaveData data)
     {
-        if (!data.TryGetData(out TesterData testerData)) return;
+        if (!data.TryGetData(out Tester1Data testerData)) return;
 
         intData = testerData.IntData;
         floatData = testerData.FloatData;
@@ -72,7 +72,7 @@ public class Tester : MonoBehaviour, ISavable
 
     public void SaveData(SaveData data)
     {
-        if (!data.TryGetData(out TesterData testerData)) return;
+        if (!data.TryGetData(out Tester1Data testerData)) return;
 
         testerData.IntData = intData;
         testerData.FloatData = floatData;
@@ -85,13 +85,13 @@ public class Tester : MonoBehaviour, ISavable
         }
     }
 
-    public class TesterData : ISaveData
+    public class Tester1Data : ISaveData
     {
         public int IntData { get; set; }
         public float FloatData { get; set; }
         public Dictionary<string, Vector3> DictionaryData { get; set; }
 
-        public TesterData()
+        public Tester1Data()
         {
             IntData = 0;
             FloatData = 0f;
