@@ -13,6 +13,8 @@ public class Tester : MonoBehaviour, ISavable
     [Space]
     [SerializeField] private string profile = "PROFILE A";
 
+    public string ModuleKey => typeof(TesterData).Name;
+
     private void OnEnable()
     {
         SaveRegistry.Register(this);
@@ -54,9 +56,26 @@ public class Tester : MonoBehaviour, ISavable
         }
     }
 
-    public void LoadData(ISaveData data)
+    [ContextMenu("Random Value")]
+    private void RandomValue()
     {
-        if (data is not TesterData testerData) return;
+        intData = Random.Range(-100, 100);
+        floatData = Random.Range(-100f, 100f);
+
+        dictionaryDataKey = new();
+        dictionaryDataValue = new();
+        for (int i = 0; i < 5; i++)
+        {
+            int ranKey = Random.Range(-999, -888);
+            Vector3 ranValue = Random.insideUnitSphere * floatData;
+            dictionaryDataKey.Add($"K{ranKey}");
+            dictionaryDataValue.Add(ranValue);
+        }
+    }
+
+    public void LoadData(SaveData data)
+    {
+        data.TryGetData(out TesterData testerData);
 
         intData = testerData.IntData;
         floatData = testerData.FloatData;
@@ -70,9 +89,9 @@ public class Tester : MonoBehaviour, ISavable
         }
     }
 
-    public void SaveData(ISaveData data)
+    public void SaveData(SaveData data)
     {
-        if (data is not TesterData testerData) return;
+        data.TryGetData(out TesterData testerData);
 
         testerData.IntData = intData;
         testerData.FloatData = floatData;

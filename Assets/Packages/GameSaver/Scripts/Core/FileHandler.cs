@@ -31,6 +31,7 @@ namespace ThanhDV.GameSaver.Core
             saveAsSeparateFiles = _saveAsSeparateFiles;
         }
 
+        #region Read
         public async Task<T> Read<T>(string profileId, bool allowRestoreFromBackup = true) where T : class
         {
             string profilePath = Path.Combine(filePath, profileId);
@@ -51,7 +52,7 @@ namespace ThanhDV.GameSaver.Core
                 {
                     string moduleKey = Path.GetFileNameWithoutExtension(file);
                     ISaveData moduleData = await ReadObject<ISaveData>(file, allowRestoreFromBackup);
-                    if (moduleData != null) saveData.DataModules.TryAdd(moduleKey, moduleData);
+                    if (moduleData != null) saveData.TryAddData(moduleKey, moduleData);
                 }
 
                 return saveData as T;
@@ -63,7 +64,7 @@ namespace ThanhDV.GameSaver.Core
             }
         }
 
-        public async Task<T> ReadModule<T>(string profileId, string moduleKey, bool allowRestoreFromBackup = true) where T : class, ISaveData
+        public async Task<ISaveData> ReadModule(string profileId, string moduleKey, bool allowRestoreFromBackup = true)
         {
             if (!saveAsSeparateFiles)
             {
@@ -81,12 +82,12 @@ namespace ThanhDV.GameSaver.Core
                 return null;
             }
 
-            return await ReadObject<T>(fullPath, allowRestoreFromBackup);
+            return await ReadObject<ISaveData>(fullPath, allowRestoreFromBackup);
         }
 
-        public async Task<Dictionary<string, T>> ReadAll<T>() where T : class
+        public async Task<Dictionary<string, SaveData>> ReadAllProfile()
         {
-            Dictionary<string, T> profiles = new();
+            Dictionary<string, SaveData> profiles = new();
             if (!Directory.Exists(filePath))
             {
                 Debug.Log("<color=yellow>[GameSaver] Save directory does not exist. No profiles to load!!!</color>");
@@ -97,13 +98,13 @@ namespace ThanhDV.GameSaver.Core
             var loadDataTasks = directoryInfos.Select(async dirInfo =>
             {
                 string profileId = dirInfo.Name;
-                T data = await Read<T>(profileId);
+                SaveData data = await Read<SaveData>(profileId);
                 return (profileId, data);
             }).ToList();
 
             var results = await Task.WhenAll(loadDataTasks);
 
-            foreach ((string profileId, T data) in results)
+            foreach ((string profileId, SaveData data) in results)
             {
                 if (data != null)
                 {
@@ -173,24 +174,31 @@ namespace ThanhDV.GameSaver.Core
 
             return loadedData;
         }
+        #endregion
 
+        #region Write
         public async Task Write(SaveData data, string profileId)
         {
-            string profilePath = Path.Combine(filePath, profileId);
-
             if (saveAsSeparateFiles)
             {
-                var writeTasks = data.DataModules.Select(kvp => WriteModule(kvp.Value, kvp.Key, profilePath));
+                var writeTasks = data.GetDataModules().Select(kvp => WriteModule(kvp.Value, kvp.Key, profileId));
                 await Task.WhenAll(writeTasks);
             }
             else
             {
-                await WriteObject(data, fileName, profilePath);
+                await WriteObject(data, fileName, profileId);
             }
         }
 
-        private async Task WriteModule(ISaveData data, string moduleKey, string profilePath)
+        public async Task WriteModule(ISaveData data, string moduleKey, string profileId)
         {
+            if (!saveAsSeparateFiles)
+            {
+                Debug.Log("<color=yellow>[GameSaver] WriteModule is only supported when 'Save As Separate Files' mode is enabled!!!</color>");
+                return;
+            }
+
+            string profilePath = Path.Combine(filePath, profileId);
             string fileExtention = this.fileName.Split('.')[^1];
             string fileName = $"{moduleKey}.{fileExtention}";
 
@@ -249,7 +257,9 @@ namespace ThanhDV.GameSaver.Core
                 if (File.Exists(tempPath)) File.Delete(tempPath);
             }
         }
+        #endregion
 
+        #region Helper
         public void Delete(string profileId)
         {
             if (string.IsNullOrEmpty(profileId)) return;
@@ -323,5 +333,7 @@ namespace ThanhDV.GameSaver.Core
 
             return success;
         }
+
+        #endregion
     }
 }

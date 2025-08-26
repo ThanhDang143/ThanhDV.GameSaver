@@ -2,7 +2,8 @@ namespace ThanhDV.GameSaver.Core
 {
     public interface ISavable
     {
-        void SaveData(ISaveData data);
-        void LoadData(ISaveData data);
+        string ModuleKey { get; }
+        void SaveData(SaveData data);
+        void LoadData(SaveData data);
     }
 }

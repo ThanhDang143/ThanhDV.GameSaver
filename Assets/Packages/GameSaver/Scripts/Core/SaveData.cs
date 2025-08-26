@@ -7,41 +7,33 @@ namespace ThanhDV.GameSaver.Core
     [System.Serializable]
     public class SaveData
     {
-        public Dictionary<string, ISaveData> DataModules { get; set; }
+        // this field must be public
+        public Dictionary<string, ISaveData> DataModules { get; }
 
         public SaveData()
         {
             DataModules = new();
         }
 
-        public async Task<T> GetDataAsync<T>() where T : class, ISaveData, new()
-        {
-            ISaveData saveData = await GameSaver.Instance.LoadModule<T>();
+        public Dictionary<string, ISaveData> GetDataModules() => DataModules;
 
-            if (saveData != null) return saveData as T;
-
-            Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
-            T data = new();
-            CreateData(data);
-            return data;
-        }
-
-        public T GetData<T>() where T : class, ISaveData, new()
+        public bool TryGetData<T>(out T data) where T : class, ISaveData, new()
         {
             string key = typeof(T).Name;
 
             if (DataModules.TryGetValue(key, out ISaveData savedData))
             {
-                return savedData as T;
+                data = savedData as T;
+                return true;
             }
 
             Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
-            T data = new();
+            data = new();
             CreateData(data);
-            return data;
+            return false;
         }
 
-        public void CreateData<T>(T newData) where T : class, ISaveData, new()
+        private void CreateData<T>(T newData) where T : class, ISaveData, new()
         {
             string key = typeof(T).Name;
 
@@ -50,6 +42,22 @@ namespace ThanhDV.GameSaver.Core
                 Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
                 return;
             }
+        }
+
+        public bool TryGetData(string moduleKey, out ISaveData data)
+        {
+            return DataModules.TryGetValue(moduleKey, out data);
+        }
+
+        public bool TryAddData(string moduleKey, ISaveData newData)
+        {
+            if (!DataModules.TryAdd(moduleKey, newData))
+            {
+                Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
+                return false;
+            }
+
+            return true;
         }
     }
 }
