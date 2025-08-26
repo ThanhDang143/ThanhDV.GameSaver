@@ -13,10 +13,8 @@ namespace ThanhDV.GameSaver.Core
     public class FileHandler : IDataHandler
     {
         private const string TEMP_EXTENSION = ".tmp";
-        private const int MAX_CONCURRENT_READS = 5;
 
-        private readonly object profileLock = new();
-        private readonly SemaphoreSlim readSemaphore = new(MAX_CONCURRENT_READS);
+        private static readonly ReaderWriterLockSlim fileLock = new();
 
         private readonly string filePath = "";
         private readonly string fileName = "";
@@ -126,17 +124,12 @@ namespace ThanhDV.GameSaver.Core
 
             T loadedData = null;
 
-            await readSemaphore.WaitAsync().ConfigureAwait(false);
+            fileLock.EnterReadLock();
             if (File.Exists(fullPath))
             {
                 try
                 {
-                    string dataToLoad = "";
-                    using (FileStream stream = new(fullPath, FileMode.Open))
-                    using (StreamReader reader = new(stream))
-                    {
-                        dataToLoad = await reader.ReadToEndAsync();
-                    }
+                    string dataToLoad = await File.ReadAllTextAsync(fullPath);
 
                     if (useEncryption)
                     {
@@ -154,7 +147,7 @@ namespace ThanhDV.GameSaver.Core
                         Debug.Log($"<color=yellow>[GameSaver] Fail to LOAD data with ID: {profileId}. Trying to roll back!!!</color>\n{e}");
                         if (TryRollback(fullPath))
                         {
-                            loadedData = await Read<T>(profileId, false);
+                            loadedData = await ReadObject<T>(profileId, false);
                         }
                         else
                         {
@@ -168,7 +161,7 @@ namespace ThanhDV.GameSaver.Core
                 }
                 finally
                 {
-                    readSemaphore.Release();
+                    fileLock.ExitReadLock();
                 }
             }
 
@@ -217,12 +210,7 @@ namespace ThanhDV.GameSaver.Core
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
             string tempPath = fullPath + TEMP_EXTENSION;
 
-            lock (profileLock)
-            {
-                string directoryName = Path.GetDirectoryName(fullPath);
-                Directory.CreateDirectory(directoryName);
-            }
-
+            fileLock.EnterWriteLock();
             try
             {
                 string dataToSave = JsonConvert.SerializeObject(data, Formatting.Indented, JsonUtilities.UnityJsonSettings);
@@ -233,11 +221,7 @@ namespace ThanhDV.GameSaver.Core
                     dataToSave = encryptedData;
                 }
 
-                using (FileStream stream = new(tempPath, FileMode.Create))
-                using (StreamWriter writer = new(stream))
-                {
-                    await writer.WriteAsync(dataToSave);
-                }
+                await File.WriteAllTextAsync(tempPath, dataToSave);
 
                 if (File.Exists(fullPath))
                 {
@@ -254,6 +238,7 @@ namespace ThanhDV.GameSaver.Core
             }
             finally
             {
+                fileLock.ExitWriteLock();
                 if (File.Exists(tempPath)) File.Delete(tempPath);
             }
         }
