@@ -3,8 +3,8 @@ using UnityEngine;
 using ThanhDV.GameSaver.Helper;
 using System.Threading.Tasks;
 using System.Collections;
-using System.Reflection;
-using System.Linq;
+using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -63,8 +63,9 @@ namespace ThanhDV.GameSaver.Core
         private Coroutine autoSaveCoroutine;
 
         #region Initialization
-        private void Initialize()
+        private async void Initialize()
         {
+            bool loadSettingsSuccess = await TryLoadSettings();
             if (saveSettings == null)
             {
                 Debug.Log("<color=red>[GameSaver] SaveSettings is not assigned. Please assign a SaveSettings asset!!!</color>");
@@ -75,7 +76,7 @@ namespace ThanhDV.GameSaver.Core
             InitializeProfile();
             SaveRegistry.Bind(Register, Unregister);
 
-            _ = LoadGame();
+            await LoadGame();
 
             StartAutoSave();
 
@@ -94,6 +95,18 @@ namespace ThanhDV.GameSaver.Core
         {
             string mostRecentProfile = GetMostRecentProfile();
             curProfileId = string.IsNullOrEmpty(mostRecentProfile) ? Constant.DEFAULT_PROFILE_ID : mostRecentProfile;
+        }
+
+        private async Task<bool> TryLoadSettings()
+        {
+            if (saveSettings != null) return true;
+
+            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_NAME);
+            saveSettings = await handle.Task;
+
+            handle.Release();
+
+            return saveSettings != null;
         }
 
         private async void Register(ISavable savable)

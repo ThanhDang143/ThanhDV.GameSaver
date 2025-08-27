@@ -14,8 +14,6 @@ namespace ThanhDV.GameSaver.Core
     {
         private const string TEMP_EXTENSION = ".tmp";
 
-        private static readonly ReaderWriterLockSlim fileLock = new();
-
         private readonly string filePath = "";
         private readonly string fileName = "";
         private readonly bool useEncryption = true;
@@ -124,7 +122,6 @@ namespace ThanhDV.GameSaver.Core
 
             T loadedData = null;
 
-            fileLock.EnterReadLock();
             if (File.Exists(fullPath))
             {
                 try
@@ -147,7 +144,8 @@ namespace ThanhDV.GameSaver.Core
                         Debug.Log($"<color=yellow>[GameSaver] Fail to LOAD data with ID: {profileId}. Trying to roll back!!!</color>\n{e}");
                         if (TryRollback(fullPath))
                         {
-                            loadedData = await ReadObject<T>(profileId, false);
+                            string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
+                            loadedData = await ReadObject<T>(backupPath, false);
                         }
                         else
                         {
@@ -158,10 +156,6 @@ namespace ThanhDV.GameSaver.Core
                     {
                         Debug.Log($"<color=red>[GameSaver] Fail to LOAD data with ID: {profileId}. Can not roll back or backup is also corrupt!!!</color>\n{e}");
                     }
-                }
-                finally
-                {
-                    fileLock.ExitReadLock();
                 }
             }
 
@@ -179,7 +173,8 @@ namespace ThanhDV.GameSaver.Core
             }
             else
             {
-                await WriteObject(data, fileName, profileId);
+                string profilePath = Path.Combine(filePath, profileId);
+                await WriteObject(data, fileName, profilePath);
             }
         }
 
@@ -206,11 +201,12 @@ namespace ThanhDV.GameSaver.Core
                 return;
             }
 
+            Directory.CreateDirectory(profilePath);
+
             string fullPath = Path.Combine(profilePath, fileName);
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
             string tempPath = fullPath + TEMP_EXTENSION;
 
-            fileLock.EnterWriteLock();
             try
             {
                 string dataToSave = JsonConvert.SerializeObject(data, Formatting.Indented, JsonUtilities.UnityJsonSettings);
@@ -238,7 +234,6 @@ namespace ThanhDV.GameSaver.Core
             }
             finally
             {
-                fileLock.ExitWriteLock();
                 if (File.Exists(tempPath)) File.Delete(tempPath);
             }
         }
