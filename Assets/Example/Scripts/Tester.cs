@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using ThanhDV.GameSaver.Core;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class Tester : MonoBehaviour, ISavable
 {
@@ -13,7 +15,7 @@ public class Tester : MonoBehaviour, ISavable
     [Space]
     [SerializeField] private string profile = "PROFILE A";
 
-    public string ModuleKey => typeof(TesterData).Name;
+    public Type SaveType => typeof(TesterData);
 
     private void OnEnable()
     {
