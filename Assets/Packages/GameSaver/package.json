@@ -1,0 +1,28 @@
+{
+    "name": "thanhdv.gamesaver",
+    "version": "0.0.3",
+    "displayName": "ThanhDV's GameSaver",
+    "description": "Lightweight save system for Unity.",
+    "unity": "2022.3",
+    "keywords": [
+        "SaveSystem",
+        "Save",
+        "Load",
+        "Persistable"
+    ],
+    "author": {
+        "name": "ThanhDV",
+        "email": "vanthanh1998@gmail.com",
+        "url": "https://books.thanhdv.icu/"
+    },
+    "dependencies": {
+        "com.unity.addressables": "1.22.3",
+        "thanhdv.newtonsoft.json": "3.2.5"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ThanhDang143/ThanhDV.GameSaver.git"
+    },
+    "changelogUrl": "https://github.com/ThanhDang143/ThanhDV.GameSaver/blob/main/Assets/Packages/GameSaver/CHANGELOG.md",
+    "license": "MIT"
+}

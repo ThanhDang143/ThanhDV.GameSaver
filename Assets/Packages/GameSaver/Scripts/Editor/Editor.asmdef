@@ -3,7 +3,10 @@
     "rootNamespace": "ThanhDV.GameSaver",
     "references": [
         "GUID:25c9ab5cb36c4c94bb01b0f4c16b1cb3",
-        "GUID:645ee2492fce7534a97a04bbdca2eb30"
+        "GUID:645ee2492fce7534a97a04bbdca2eb30",
+        "GUID:69448af7b92c7f342b298e06a37122aa",
+        "GUID:03ef45ea72d7e2d4da0fe8ede356901e",
+        "GUID:b1d1d33334b51724b9bc4457a3ebd9ee"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

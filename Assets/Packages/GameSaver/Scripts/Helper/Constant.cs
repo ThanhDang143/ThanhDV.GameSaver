@@ -7,5 +7,6 @@ namespace ThanhDV.GameSaver.Helper
         public const string DEFAULT_PROFILE_ID = "PROFILE A";
 
         public const string FILE_BACKUP_EXTENTION = ".bak";
+        public const string SAVE_SETTINGS_NAME = "SaveSettings";
     }
 }

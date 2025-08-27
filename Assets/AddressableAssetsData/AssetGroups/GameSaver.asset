@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: GameSaver
+  m_EditorClassIdentifier: 
+  m_GroupName: GameSaver
+  m_Data:
+    m_SerializedData: []
+  m_GUID: 8e97e292e3979914eb972cdea1741289
+  m_SerializeEntries:
+  - m_GUID: 00bbf91fee0d55d48b57b5f2c680fca5
+    m_Address: SaveSettings
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  m_ReadOnly: 0
+  m_Settings: {fileID: 11400000, guid: abc9d8bba3da7a34189043ef1c8c2f00, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 34bbb854fc7fa1640b3d88071194b579, type: 2}
