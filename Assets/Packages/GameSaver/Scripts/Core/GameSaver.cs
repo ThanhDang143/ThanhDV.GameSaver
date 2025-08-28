@@ -247,14 +247,14 @@ namespace ThanhDV.GameSaver.Core
 
         private async Task LoadFromMultiFile()
         {
-            if (!TryCreateProfileOnFirstRun()) return;
-
             List<Task> loadTasks = new();
             foreach (ISavable savable in savableObjs)
             {
                 loadTasks.Add(LoadAndApplyData(savable));
             }
             await Task.WhenAll(loadTasks);
+
+            if (!TryCreateProfileOnFirstRun()) return;
 
             foreach (ISavable savable in savableObjs)
             {
@@ -268,8 +268,8 @@ namespace ThanhDV.GameSaver.Core
             async Task LoadAndApplyData(ISavable savable)
             {
                 string moduleKey = savable.SaveType.Name;
-                await LoadModule(moduleKey);
-                savable.LoadData(saveData);
+                ISaveData data = await LoadModule(moduleKey);
+                if (data != null) savable.LoadData(saveData);
             }
         }
 
@@ -355,12 +355,12 @@ namespace ThanhDV.GameSaver.Core
         /// <returns> true if data already existed or was created; otherwise false.</returns> 
         private bool TryCreateProfileOnFirstRun()
         {
-            if (saveData != null) return true;
+            if (saveData != null && saveData.DataModules != null && saveData.DataModules.Count > 0) return true;
 
             if (saveSettings.CreateProfileOnFirstRun)
             {
-                NewGame(Constant.DEFAULT_PROFILE_ID);
                 Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
+                NewGame(Constant.DEFAULT_PROFILE_ID);
             }
             else
             {
