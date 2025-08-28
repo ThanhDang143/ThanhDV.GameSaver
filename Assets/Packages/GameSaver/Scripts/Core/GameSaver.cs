@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using System.Collections;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
+using System.IO;
+using System.Linq;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -57,7 +59,7 @@ namespace ThanhDV.GameSaver.Core
         [SerializeField] private SaveSettings saveSettings;
 
         private string curProfileId;
-        private SaveData saveData;
+        private SaveData saveData = new();
         private readonly HashSet<ISavable> savableObjs = new();
         private IDataHandler dataHandler;
         private Coroutine autoSaveCoroutine;
@@ -247,14 +249,14 @@ namespace ThanhDV.GameSaver.Core
 
         private async Task LoadFromMultiFile()
         {
+            if (!TryCreateProfileOnFirstRun()) return;
+
             List<Task> loadTasks = new();
             foreach (ISavable savable in savableObjs)
             {
                 loadTasks.Add(LoadAndApplyData(savable));
             }
             await Task.WhenAll(loadTasks);
-
-            if (!TryCreateProfileOnFirstRun()) return;
 
             foreach (ISavable savable in savableObjs)
             {
@@ -355,7 +357,14 @@ namespace ThanhDV.GameSaver.Core
         /// <returns> true if data already existed or was created; otherwise false.</returns> 
         private bool TryCreateProfileOnFirstRun()
         {
-            if (saveData != null && saveData.DataModules != null && saveData.DataModules.Count > 0) return true;
+            if (saveSettings.SaveAsSeparateFiles)
+            {
+                if (HasAnySaveFiles()) return true;
+            }
+            else
+            {
+                if (saveData != null) return true;
+            }
 
             if (saveSettings.CreateProfileOnFirstRun)
             {
@@ -364,10 +373,28 @@ namespace ThanhDV.GameSaver.Core
             }
             else
             {
-                Debug.Log("<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()/SaveGame()!!!</color>");
+                Debug.Log($"<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()/SaveGame()!!!</color>");
             }
 
             return saveSettings.CreateProfileOnFirstRun;
+        }
+
+        public bool HasAnySaveFiles()
+        {
+            string root = Application.persistentDataPath;
+            if (!Directory.Exists(root)) return false;
+
+            string ext = string.IsNullOrEmpty(saveSettings.FileExtension) ? Constant.DEFAULT_FILE_SAVE_EXTENSION : saveSettings.FileExtension;
+            if (!ext.StartsWith(".")) ext = "." + ext;
+
+            try
+            {
+                return Directory.EnumerateFiles(root, "*" + ext, SearchOption.AllDirectories).Any();
+            }
+            catch (System.Exception)
+            {
+                return false;
+            }
         }
     }
     #endregion

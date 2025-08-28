@@ -12,9 +12,6 @@ public class Tester1 : MonoBehaviour, ISavable
     [SerializeField] private List<string> dictionaryDataKey;
     [SerializeField] private List<Vector3> dictionaryDataValue;
 
-    [Space]
-    [SerializeField] private string profile = "PROFILE A";
-
     public Type SaveType => typeof(Tester1Data);
 
     private void OnEnable()
@@ -25,37 +22,6 @@ public class Tester1 : MonoBehaviour, ISavable
     private void OnDisable()
     {
         SaveRegistry.Unregister(this);
-    }
-
-    private void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.A))
-        {
-            GameSaver.Instance.SetProfileID("PROFILE A");
-            GameSaver.Instance.SaveGame();
-        }
-
-        if (Input.GetKeyDown(KeyCode.B))
-        {
-            GameSaver.Instance.SetProfileID("PROFILE B");
-            GameSaver.Instance.SaveGame();
-        }
-
-        if (Input.GetKeyDown(KeyCode.C))
-        {
-            GameSaver.Instance.SetProfileID("PROFILE C");
-            GameSaver.Instance.SaveGame();
-        }
-
-        if (Input.GetKeyDown(KeyCode.D))
-        {
-            GameSaver.Instance.DeleteData(profile);
-        }
-
-        if (Input.GetKeyDown(KeyCode.N))
-        {
-            GameSaver.Instance.NewGame(profile);
-        }
     }
 
     [ContextMenu("Random Value")]

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: SaveSettings
   m_EditorClassIdentifier: 
   createProfileOnFirstRun: 1
-  useEncryption: 1
+  useEncryption: 0
   saveAsSeparateFiles: 1
   fileName: Default
   fileExtension: .tdv
