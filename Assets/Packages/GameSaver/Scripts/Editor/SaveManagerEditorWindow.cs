@@ -25,7 +25,7 @@ namespace ThanhDV.GameSaver
         private bool isLoading = false;
         private IDataHandler dataHandler;
         private readonly Dictionary<string, bool> foldoutStates = new();
-        private bool _hasUnsavedChanges = false;
+        private bool hasDataUnsaved = false;
 
         [MenuItem("Tools/GameSaver/Save Manager")]
         public static void ShowWindow()
@@ -78,7 +78,7 @@ namespace ThanhDV.GameSaver
                 return;
             }
 
-            EditorGUI.BeginDisabledGroup(_hasUnsavedChanges);
+            EditorGUI.BeginDisabledGroup(hasDataUnsaved);
             if (GUILayout.Button("Refresh Data"))
             {
                 LoadAllProfilesData();
@@ -87,12 +87,19 @@ namespace ThanhDV.GameSaver
             if (selectedProfileIndex >= 0 && selectedProfileIndex < profileIds.Length)
             {
                 string selectedProfileId = profileIds[selectedProfileIndex];
-                EditorGUI.BeginDisabledGroup(!_hasUnsavedChanges);
+                EditorGUI.BeginDisabledGroup(!hasDataUnsaved);
                 if (GUILayout.Button("Save Changes"))
                 {
                     SaveChanges(selectedProfileId);
                 }
                 EditorGUI.EndDisabledGroup();
+                var originalColor = GUI.backgroundColor;
+                GUI.backgroundColor = Color.red;
+                if (GUILayout.Button("Delete Profile"))
+                {
+                    DeleteProfile(selectedProfileId);
+                }
+                GUI.backgroundColor = originalColor;
             }
 
             EditorHelper.DrawHorizontalLine();
@@ -110,12 +117,12 @@ namespace ThanhDV.GameSaver
             }
 
             // Dropdown to select profile
-            EditorGUI.BeginDisabledGroup(_hasUnsavedChanges);
+            EditorGUI.BeginDisabledGroup(hasDataUnsaved);
             int newProfileIndex = EditorGUILayout.Popup("Select Profile", selectedProfileIndex, profileIds);
             if (newProfileIndex != selectedProfileIndex)
             {
                 selectedProfileIndex = newProfileIndex;
-                _hasUnsavedChanges = false;
+                hasDataUnsaved = false;
             }
             EditorGUI.EndDisabledGroup();
 
@@ -236,7 +243,7 @@ namespace ThanhDV.GameSaver
             if (EditorGUI.EndChangeCheck() && newValue != null)
             {
                 value.Replace(newValue);
-                _hasUnsavedChanges = true;
+                hasDataUnsaved = true;
             }
         }
 
@@ -302,7 +309,7 @@ namespace ThanhDV.GameSaver
         {
             if (saveSettings == null) return;
             isLoading = true;
-            _hasUnsavedChanges = false;
+            hasDataUnsaved = false;
             Repaint();
 
             allProfilesData = new Dictionary<string, JObject>();
@@ -375,7 +382,7 @@ namespace ThanhDV.GameSaver
                     SaveData saveData = dataToSave.ToObject<SaveData>(JsonSerializer.Create(JsonUtilities.UnityJsonSettings));
                     await dataHandler.Write(saveData, profileId);
                     EditorUtility.DisplayDialog("Save Successful", $"The save file for profile '{profileId}' was updated successfully.", "OK");
-                    _hasUnsavedChanges = false;
+                    hasDataUnsaved = false;
                 }
                 catch (Exception e)
                 {
@@ -386,6 +393,17 @@ namespace ThanhDV.GameSaver
                 {
                     Repaint();
                 }
+            }
+        }
+
+        private void DeleteProfile(string profileId)
+        {
+            if (EditorUtility.DisplayDialog("Delete Profile?",
+                $"This will permanently delete all save data for profile '{profileId}'.\nThis action cannot be undone.",
+                "Delete", "Cancel"))
+            {
+                dataHandler.Delete(profileId);
+                LoadAllProfilesData();
             }
         }
     }

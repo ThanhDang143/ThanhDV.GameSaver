@@ -9,6 +9,7 @@ public class Tester1 : MonoBehaviour, ISavable
     [Space]
     [SerializeField] private int intData;
     [SerializeField] private float floatData;
+    [SerializeField] private Struct structData;
     [SerializeField] private List<string> dictionaryDataKey;
     [SerializeField] private List<Vector3> dictionaryDataValue;
 
@@ -30,6 +31,10 @@ public class Tester1 : MonoBehaviour, ISavable
         intData = Random.Range(-100, 100);
         floatData = Random.Range(-100f, 100f);
 
+        structData.i = Random.Range(-100, 100);
+        structData.f = Random.Range(-100f, 100f);
+        structData.v = Random.insideUnitSphere * floatData;
+
         dictionaryDataKey = new();
         dictionaryDataValue = new();
         for (int i = 0; i < 5; i++)
@@ -47,6 +52,7 @@ public class Tester1 : MonoBehaviour, ISavable
 
         intData = testerData.IntData;
         floatData = testerData.FloatData;
+        structData = testerData.StructData;
 
         dictionaryDataKey = new();
         dictionaryDataValue = new();
@@ -63,6 +69,7 @@ public class Tester1 : MonoBehaviour, ISavable
 
         testerData.IntData = intData;
         testerData.FloatData = floatData;
+        testerData.StructData = structData;
 
         testerData.DictionaryData = new();
         int dictCount = dictionaryDataKey.Count > dictionaryDataValue.Count ? dictionaryDataValue.Count : dictionaryDataKey.Count;
@@ -76,13 +83,23 @@ public class Tester1 : MonoBehaviour, ISavable
     {
         public int IntData { get; set; }
         public float FloatData { get; set; }
+        public Struct StructData { get; set; }
         public Dictionary<string, Vector3> DictionaryData { get; set; }
 
         public Tester1Data()
         {
             IntData = 0;
             FloatData = 0f;
+            StructData = new();
             DictionaryData = new();
         }
     }
+}
+
+[Serializable]
+public struct Struct
+{
+    public int i;
+    public float f;
+    public Vector3 v;
 }

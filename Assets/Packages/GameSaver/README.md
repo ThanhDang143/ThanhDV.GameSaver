@@ -6,6 +6,7 @@ Lightweight save system for Unity featuring:
 - Periodic Auto Save
 - AES encryption (GCM or fallback CBC + HMAC)
 - Safe backup / recovery
+- View and edit data in editor.
 
 ---
 
@@ -36,6 +37,7 @@ https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/Game
 ## How to use
 
 ### 1. Configure SaveSettings
+In Unity, open **Tools** → **GameSaver** → **SaveSettings**
 Key options:
 - Use Encryption: Turn encryption on/off.
 - File Name: Save file name inside each profile folder.

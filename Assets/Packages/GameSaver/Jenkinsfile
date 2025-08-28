@@ -1,0 +1,299 @@
+def packageVersionFromFile = ""
+def packageName = ""
+def verdaccioPackageUrl = ""
+
+pipeline {
+    // Agent with Node.js & Git required
+    agent { label "thanhsserver" }
+
+    // Ensure Node.js tool is available (configure in Jenkins Global Tool Config)
+    tools {
+        nodejs "NodeJS22"
+    }
+
+    environment {
+        // Path to the directory containing package.json
+        PROJECT_PATH = "Assets/Packages/GameSaver"
+
+        // Verdaccio registry URL
+        VERDACCIO_REGISTRY_URL = "https://upm.thanhdv.icu"
+        // Jenkins Credential ID for Verdaccio auth (e.g., Secret Text or User/Pass with token)
+        VERDACCIO_CREDENTIAL_ID = "THANHDV_VERDACCIO_AUTH"
+
+        // Jenkins Credential ID for Git auth (MUST be "Username with password" type)
+        // Username: your git username
+        // Password: your git access token
+        GIT_CREDENTIAL_ID = "THANHDV_GITHUB_JENKINS_CREDENTIAL"
+
+        // Discord webhook create on Discord and add to Jenkins credential
+        DISCORD_WEBHOOK = "DISCORD_VERDACCIO_WEBHOOK"
+
+        // Release if commit has this key
+        RELEASE_KEYWORD = "Release v"
+    }
+    // === End Configuration ===
+
+    // Pipeline options
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: "10"))
+        timeout(time: 30, unit: "MINUTES")
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage("Checkout") {
+            steps {
+                // Get source code
+                checkout scm
+                // git lfs pull // Uncomment if using Git LFS
+            }
+        }
+        
+        // stage("Validate Commit Message") {
+        //     steps {
+        //         dir(env.PROJECT_PATH) {
+        //             script {
+        //                 def isManualTrigger = false
+        //                 currentBuild.getBuildCauses().each{ cause -> 
+        //                     if (cause instanceof hudson.model.Cause$UserIdCause || cause.shortDescription.contains("Started by user ")) {
+        //                         isManualTrigger = true
+        //                     }
+        //                 }
+
+        //                 if (isManualTrigger) {
+        //                     echo "Build triggered by User! Ignore Validate Commit Message."
+        //                 } else {
+        //                     def commitMessage = bat(script: 'git log -1 --pretty=%%B', returnStdout: true).trim()
+        //                     echo "Checking commit message: ${commitMessage}"
+        //                     if (!commitMessage.contains(RELEASE_KEYWORD)) {
+        //                         echo "Build condition not met! Aborting pipeline..."
+        //                         currentBuild.result = 'ABORTED'
+        //                         return
+        //                     }
+        //                 }
+
+        //                 echo "Commit message is valid for release."
+        //             }
+        //         }
+        //     }
+        // }
+
+        stage("Prepare") {
+            when {
+                expression { return currentBuild.result != "ABORTED" }
+            }
+
+            steps {
+                // Operate within the project directory
+                dir(env.PROJECT_PATH) {
+                    script {
+                        // Read version directly from package.json
+                        def pkg = readJSON file: "package.json" // Assumes package.json is at PROJECT_PATH root
+                        if (!pkg || !pkg.version || !pkg.name) {
+                             error "Could not read version from package.json"
+                        }
+                        
+                        // Store the version in the script-level variable
+                        packageVersionFromFile = pkg.version
+                        echo "Package version: ${packageVersionFromFile}"
+
+                        packageName = pkg.name
+                        echo "Package name: ${packageName}"
+
+                        verdaccioPackageUrl = "${env.VERDACCIO_REGISTRY_URL}/-/web/detail/${packageName}"
+                        echo "Package URL: ${verdaccioPackageUrl}"
+
+                        if (!packageVersionFromFile || !packageName || !verdaccioPackageUrl) {
+                             error "Failed to set variable."
+                        }
+
+                        withCredentials([usernamePassword(credentialsId: env.VERDACCIO_CREDENTIAL_ID, usernameVariable: "NPM_USER", passwordVariable: "NPM_PASS")]) {
+                            echo "Configuring npm for Verdaccio using Username/Password..."
+                            // Encrypt username:password to Base64
+                            def userPass = "${NPM_USER}:${NPM_PASS}"
+                            def encodedAuth = java.util.Base64.getEncoder().encodeToString(userPass.getBytes("UTF-8"))
+
+                            def registryUri = new URI(env.VERDACCIO_REGISTRY_URL)
+                            def registryAuthority = registryUri.getAuthority()
+                            def registryHostPath = "//${registryAuthority}/"
+
+                            // Configure .npmrc for Verdaccio registry & auth token
+                            bat "echo ${registryHostPath}:_auth=\"${encodedAuth}\" > .npmrc"
+                            bat "echo registry=${env.VERDACCIO_REGISTRY_URL} >> .npmrc"
+                            echo ".npmrc configured."
+                        }
+
+                        // Install dependencies (might run prepublish scripts)
+                        echo "Running npm install..."
+                        bat "npm install"
+                    }
+                }
+            }
+        }
+
+        stage("Publish") {
+            when {
+                expression { return currentBuild.result != "ABORTED" }
+            }
+
+            steps {
+                // Operate within the project directory
+                dir(env.PROJECT_PATH) {
+                    script {                        
+                        // Use the version read from package.json
+                        echo "Publishing package version ${packageVersionFromFile} to ${env.VERDACCIO_REGISTRY_URL}"
+                        try {
+                            // Publish using npm (reads package.json for name/version, uses .npmrc for auth/registry)
+                            bat "npm publish --registry ${env.VERDACCIO_REGISTRY_URL}"
+                            echo "Package version ${packageVersionFromFile} published successfully!"
+                        } catch (err) {
+                            echo "ERROR: Failed to publish package!"
+                            error "Publish failed: ${err.getMessage()}"
+                        }
+                    }
+                }
+            }
+        }
+
+        // // (Optional) Tag commit with the existing version from package.json
+        // stage("Tag Existing Version") {
+        //     // Only run on overall success so far
+        //     when { expression { currentBuild.result == null || currentBuild.result == "SUCCESS" } }
+        //     steps {
+        //         // Operate within the project directory
+        //         dir(env.PROJECT_PATH) {
+        //             script {
+        //                  echo "Tagging commit with existing version v${packageVersionFromFile}..."
+
+        //                  // Inject Git credentials (Username = Git user, Password = Access Token)
+        //                 withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: "GIT_USERNAME", passwordVariable: "GIT_ACCESS_TOKEN")]) {
+
+        //                     // Configure Git user (may not be needed if just tagging)
+        //                     bat "git config user.email \"vanthanh1998@gmail.com\"" // EDIT Or use a specific user
+        //                     bat "git config user.name \"ThanhDVs Jenkins\""
+
+        //                     // NO commit needed here as we didn"t change package.json version via npm version
+
+        //                     // Create annotated tag using the version from package.json
+        //                     bat "git tag -a v${packageVersionFromFile} -m \"Release v${packageVersionFromFile}\"" // Use the read version
+
+        //                     // Push tag using HTTPS URL with embedded token
+        //                     def repoUrl = scm.userRemoteConfigs[0].url
+        //                     if (!repoUrl || !repoUrl.startsWith("https://")) {
+        //                         error "Could not determine HTTPS repository URL from SCM configuration."
+        //                     }
+        //                     def repoUrlClean = repoUrl.replaceAll(/https?:\/\/[^\/]+@/, "https://")
+        //                     def pushUrl = repoUrlClean.replaceFirst("https://", "https://${GIT_USERNAME}:${GIT_ACCESS_TOKEN}@")
+
+        //                     // Push only the tag
+        //                     bat "git push ${pushUrl} refs/tags/v${packageVersionFromFile}:refs/tags/v${packageVersionFromFile}"
+
+        //                     echo "Version tag v${packageVersionFromFile} pushed successfully."
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+    }
+
+    // Post-build actions
+    post {
+        // Always run cleanup
+        always {
+            echo "Build finished. Cleaning up..."
+            // Clean up sensitive .npmrc file
+            dir(env.PROJECT_PATH) {
+                script {
+                    try {
+                        bat "del /F /Q .npmrc"
+                    } catch (err) {
+                        echo "Could not delete .npmrc (maybe it doesn't exist): ${err.getMessage()}"
+                    }
+                }
+            }
+        }
+        
+        // On success
+        success {
+            echo "Pipeline successful!"
+
+            // Save artifacts if need
+            // archiveArtifacts artifacts: '**/*.tgz', allowEmptyArchive: true
+            
+            echo "Cleaning up workspace..."
+            deleteDir()
+
+            echo "Sending success notification to Discord..."
+            script {
+                // Send
+                withCredentials([string(credentialsId: "${env.DISCORD_WEBHOOK}", variable: 'DISCORD_WEBHOOK_URL_SECRET')]) {
+                    discordSend(
+                        webhookURL: DISCORD_WEBHOOK_URL_SECRET,
+                        title: "✅ Success: ${env.JOB_NAME}", 
+                        description: "Job `${env.JOB_NAME}` build #${env.BUILD_NUMBER} published package `${packageName}@${packageVersionFromFile}` successfully.\nBuild Log: ${env.BUILD_URL}.\nPackage URL: ${verdaccioPackageUrl}",
+                        result: "SUCCESS",
+                        link: env.BUILD_URL,
+                        footer: "Jenkins Build Notification"
+                    )
+                }
+            }
+        }
+        
+        // On failure
+        failure {
+            echo "Pipeline failed!"
+
+            echo "Sending failure notification to Discord..."
+            script {    
+                // Send
+                withCredentials([string(credentialsId: "${env.DISCORD_WEBHOOK}", variable: 'DISCORD_WEBHOOK_URL_SECRET')]) {
+                    discordSend(
+                        webhookURL: DISCORD_WEBHOOK_URL_SECRET,
+                        title: "❌ Failure: ${env.JOB_NAME}",
+                        description: "Job `${env.JOB_NAME}` build #${env.BUILD_NUMBER} failed to publish package `${packageName}`.\nBuild Log: ${env.BUILD_URL}",
+                        result: "FAILURE",
+                        link: env.BUILD_URL,
+                        footer: "Jenkins Build Notification"
+                    )
+                }
+            }
+        }
+
+        aborted {
+            echo "Pipeline aborted!"
+            echo "Sending abort notification to Discord..."
+            script {    
+                // Send
+                withCredentials([string(credentialsId: "${env.DISCORD_WEBHOOK}", variable: 'DISCORD_WEBHOOK_URL_SECRET')]) {
+                    discordSend(
+                        webhookURL: DISCORD_WEBHOOK_URL_SECRET,
+                        title: "ℹ️ Aborted: ${env.JOB_NAME}",
+                        description: "Build #${env.BUILD_NUMBER} for job `${env.JOB_NAME}` was aborted.",
+                        result: "ABORTED",
+                        link: env.BUILD_URL,
+                        footer: "Jenkins Build Notification"
+                    )
+                }
+            }
+        }
+
+        unstable {
+            echo "Pipeline unstable!"
+            
+            echo "Sending unstable notification to Discord..."
+            script {    
+                withCredentials([string(credentialsId: "${env.DISCORD_WEBHOOK}", variable: 'DISCORD_WEBHOOK_URL_SECRET')]) {
+                    discordSend(
+                        webhookURL: DISCORD_WEBHOOK_URL_SECRET,
+                        title: "⚠️ Unstable: ${env.JOB_NAME}",
+                        description: "Job `${env.JOB_NAME}` build #${env.BUILD_NUMBER} finished with unstable status during processing of package `${packageName}`.\nBuild Log: ${env.BUILD_URL}",
+                        result: "UNSTABLE",
+                        link: env.BUILD_URL,
+                        footer: "Jenkins Build Notification"
+                    )
+                }
+            }
+        }
+    }
+}

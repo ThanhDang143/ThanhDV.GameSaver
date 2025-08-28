@@ -244,23 +244,23 @@ namespace ThanhDV.GameSaver.Core
         {
             if (string.IsNullOrEmpty(profileId)) return;
 
-            string fullPath = Path.Combine(filePath, profileId, fileName);
+            string profilePath = Path.Combine(filePath, profileId);
 
             try
             {
-                if (File.Exists(fullPath))
+                if (Directory.Exists(profilePath))
                 {
-                    string profilePath = Path.GetDirectoryName(fullPath);
                     Directory.Delete(profilePath, true);
+                    Debug.Log($"<color=red>[GameSaver] Deleted profile: {profileId}</color>");
                 }
                 else
                 {
-                    Debug.Log($"<color=red>[GameSaver] Fail to DELETE data. Data was not found at path: {fullPath}!!!</color>");
+                    Debug.Log($"<color=red>[GameSaver] Fail to DELETE data. Data was not found at path: {profilePath}!!!</color>");
                 }
             }
             catch (Exception e)
             {
-                Debug.Log($"<color=red>[GameSaver] Fail to DELETE data with profile {profileId} at path : {fullPath}!!!</color>\n{e}");
+                Debug.Log($"<color=red>[GameSaver] Fail to DELETE data with profile {profileId} at path : {profilePath}!!!</color>\n{e}");
             }
         }
 
