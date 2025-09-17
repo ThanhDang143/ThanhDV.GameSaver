@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
 using UnityEditor.AddressableAssets;
@@ -129,3 +130,4 @@ namespace ThanhDV.GameSaver.Editor
         }
     }
 }
+#endif
