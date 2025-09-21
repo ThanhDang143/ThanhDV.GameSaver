@@ -4,9 +4,9 @@ using ThanhDV.GameSaver.Helper;
 using System.Threading.Tasks;
 using System.Collections;
 using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
 using System.IO;
 using System.Linq;
+using ThanhDV.GameSaver.CustomAttribute;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -41,6 +41,13 @@ namespace ThanhDV.GameSaver.Core
 
         public static bool IsExist => _instance != null;
 
+        public static void WakeUp()
+        {
+            if (IsExist) return;
+
+            var saver = Instance;
+        }
+
         private void Awake()
         {
             if (_instance == null)
@@ -55,7 +62,7 @@ namespace ThanhDV.GameSaver.Core
         }
         #endregion
 
-        [Header("Config")]
+        [UnderlineHeader("Config")]
         [SerializeField] private SaveSettings saveSettings;
 
         private string curProfileId;
@@ -82,7 +89,7 @@ namespace ThanhDV.GameSaver.Core
 
             StartAutoSave();
 
-            Debug.Log("<color=green>[GameSaver] Initialized successfully.</color>");
+            Debug.Log("<color=green>[GameSaver] Initialized done!!!</color>");
 
         }
 
@@ -167,7 +174,7 @@ namespace ThanhDV.GameSaver.Core
         #region SaveGame
         public void SaveGame()
         {
-            if (!TryCreateProfileOnFirstRun()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
             else SaveAsAIO();
@@ -249,7 +256,7 @@ namespace ThanhDV.GameSaver.Core
 
         private async Task LoadFromMultiFile()
         {
-            if (!TryCreateProfileOnFirstRun()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             List<Task> loadTasks = new();
             foreach (ISavable savable in savableObjs)
@@ -279,7 +286,7 @@ namespace ThanhDV.GameSaver.Core
         {
             saveData = await dataHandler.Read<SaveData>(curProfileId);
 
-            if (!TryCreateProfileOnFirstRun()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             foreach (ISavable savable in savableObjs)
             {
@@ -355,8 +362,14 @@ namespace ThanhDV.GameSaver.Core
         /// Ensure save data exists; creates default profile if allowed.
         /// </summary>
         /// <returns> true if data already existed or was created; otherwise false.</returns> 
-        private bool TryCreateProfileOnFirstRun()
+        private bool TryCreateProfileIfNull()
         {
+            if (saveSettings == null)
+            {
+                Debug.Log($"<color=red>[GameSaver] SaveSettings not found. Please initialize GameSaver first!!!</color>");
+                return false;
+            }
+
             if (saveSettings.SaveAsSeparateFiles)
             {
                 if (HasAnySaveFiles()) return true;
@@ -366,7 +379,7 @@ namespace ThanhDV.GameSaver.Core
                 if (saveData != null) return true;
             }
 
-            if (saveSettings.CreateProfileOnFirstRun)
+            if (saveSettings.CreateProfileIfNull)
             {
                 Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
                 NewGame(Constant.DEFAULT_PROFILE_ID);
@@ -376,10 +389,10 @@ namespace ThanhDV.GameSaver.Core
                 Debug.Log($"<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()/SaveGame()!!!</color>");
             }
 
-            return saveSettings.CreateProfileOnFirstRun;
+            return saveSettings.CreateProfileIfNull;
         }
 
-        public bool HasAnySaveFiles()
+        private bool HasAnySaveFiles()
         {
             string root = Application.persistentDataPath;
             if (!Directory.Exists(root)) return false;

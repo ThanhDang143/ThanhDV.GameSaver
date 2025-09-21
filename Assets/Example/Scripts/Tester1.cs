@@ -4,23 +4,22 @@ using ThanhDV.GameSaver.Core;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
-public class Tester1 : MonoBehaviour, ISavable
+public class Tester1 : ISavable, IDisposable
 {
-    [Space]
-    [SerializeField] private int intData;
-    [SerializeField] private float floatData;
-    [SerializeField] private Struct structData;
-    [SerializeField] private List<string> dictionaryDataKey;
-    [SerializeField] private List<Vector3> dictionaryDataValue;
+    private int intData;
+    private float floatData;
+    private Struct structData;
+    private List<string> dictionaryDataKey;
+    private List<Vector3> dictionaryDataValue;
 
     public Type SaveType => typeof(Tester1Data);
 
-    private void OnEnable()
+    public Tester1()
     {
         SaveRegistry.Register(this);
     }
 
-    private void OnDisable()
+    public void Dispose()
     {
         SaveRegistry.Unregister(this);
     }

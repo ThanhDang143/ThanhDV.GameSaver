@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using UnityEngine;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -27,7 +25,7 @@ namespace ThanhDV.GameSaver.Core
                 return true;
             }
 
-            Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
+            // Debug.Log("<color=yellow>[GameSaver] Data does not exist yet. CREATE AND RETURN new data!!!</color>");
             data = new();
             CreateData(data);
             return false;
@@ -39,7 +37,7 @@ namespace ThanhDV.GameSaver.Core
 
             if (!DataModules.TryAdd(key, newData ?? new()))
             {
-                Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
+                // Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
                 return;
             }
         }
@@ -53,7 +51,7 @@ namespace ThanhDV.GameSaver.Core
         {
             if (!DataModules.TryAdd(moduleKey, newData))
             {
-                Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
+                // Debug.Log("<color=yellow>[GameSaver] Data already exists!!!</color>");
                 return false;
             }
 

@@ -1,10 +1,11 @@
+using ThanhDV.GameSaver.CustomAttribute;
 using UnityEditor;
 using UnityEngine;
 
 namespace ThanhDV.GameSaver.Editor
 {
-    [CustomPropertyDrawer(typeof(HeaderAttribute))]
-    public class HeaderWithLineDrawer : DecoratorDrawer
+    [CustomPropertyDrawer(typeof(UnderlineHeaderAttribute))]
+    public class UnderlineHeaderDrawer : DecoratorDrawer
     {
         public override float GetHeight()
         {
@@ -13,7 +14,7 @@ namespace ThanhDV.GameSaver.Editor
 
         public override void OnGUI(Rect position)
         {
-            HeaderAttribute headerAttribute = (HeaderAttribute)attribute;
+            UnderlineHeaderAttribute headerAttribute = (UnderlineHeaderAttribute)attribute;
             string headerText = headerAttribute.header;
 
             Rect headerRect = position;

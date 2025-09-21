@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using ThanhDV.GameSaver.Core;
+using ThanhDV.GameSaver.CustomAttribute;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
 public class Tester : MonoBehaviour, ISavable
 {
-    [Space]
+    [UnderlineHeader("Data")]
     [SerializeField] private int intData;
     [SerializeField] private float floatData;
     [SerializeField] private List<string> dictionaryDataKey;
@@ -43,13 +44,12 @@ public class Tester : MonoBehaviour, ISavable
 
         if (Input.GetKeyDown(KeyCode.C))
         {
-            GameSaver.Instance.SetProfileID("PROFILE C");
-            GameSaver.Instance.SaveGame();
+            GameSaver.WakeUp();
         }
 
         if (Input.GetKeyDown(KeyCode.D))
         {
-            GameSaver.Instance.DeleteData(profile);
+            _ = GameSaver.Instance.LoadGame();
         }
 
         if (Input.GetKeyDown(KeyCode.N))
