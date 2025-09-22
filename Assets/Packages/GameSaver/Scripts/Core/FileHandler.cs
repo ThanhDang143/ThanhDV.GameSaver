@@ -17,6 +17,7 @@ namespace ThanhDV.GameSaver.Core
         private readonly string fileName = "";
         private readonly bool useEncryption = true;
         private readonly bool saveAsSeparateFiles = false;
+        private readonly string fileExtention;
 
         public FileHandler(string _filePath, string _fileName, bool _useEncryption, bool _saveAsSeparateFiles)
         {
@@ -24,6 +25,8 @@ namespace ThanhDV.GameSaver.Core
             fileName = _fileName;
             useEncryption = _useEncryption;
             saveAsSeparateFiles = _saveAsSeparateFiles;
+
+            fileExtention = fileName.Split('.')[^1];
         }
 
         #region Read
@@ -39,7 +42,6 @@ namespace ThanhDV.GameSaver.Core
 
             if (saveAsSeparateFiles)
             {
-                string fileExtention = fileName.Split('.')[^1];
                 SaveData saveData = new();
                 string[] files = Directory.GetFiles(profilePath, $"*.{fileExtention}");
 
@@ -275,8 +277,10 @@ namespace ThanhDV.GameSaver.Core
             {
                 DirectoryInfo directory = new(filePath);
 
+                string[] patterns = { $"*.{fileExtention}", $"*{Constant.FILE_BACKUP_EXTENTION}" };
+
                 FileInfo mostRecentFile = directory.EnumerateDirectories()
-                    .SelectMany(dir => dir.EnumerateFiles("*", SearchOption.AllDirectories))
+                    .SelectMany(dir => patterns.SelectMany(p => dir.EnumerateFiles(p, SearchOption.AllDirectories)))
                     .OrderByDescending(file => file.LastWriteTimeUtc)
                     .FirstOrDefault();
 

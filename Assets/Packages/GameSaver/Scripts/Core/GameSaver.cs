@@ -196,6 +196,7 @@ namespace ThanhDV.GameSaver.Core
                 }
 
                 dataHandler.Write(saveData, curProfileId);
+                Debug.Log("<color=green>[GameSaver] SaveAIO called!!!</color>");
             }
 
             void SaveAsSeparate()
@@ -206,6 +207,7 @@ namespace ThanhDV.GameSaver.Core
                     savable.SaveData(saveData);
 
                     SaveModule(moduleKey);
+                    Debug.Log($"<color=green>[GameSaver] Save {moduleKey} called!!!</color>");
                 }
             }
         }
