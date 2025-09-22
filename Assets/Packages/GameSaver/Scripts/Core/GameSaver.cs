@@ -86,9 +86,10 @@ namespace ThanhDV.GameSaver.Core
 
             InitializeDataHandler();
             InitializeProfile();
-            SaveRegistry.Bind(Register, Unregister);
 
             await InternalLoadGame();
+            
+            SaveRegistry.Bind(Register, Unregister);
 
             StartAutoSave();
 
@@ -142,6 +143,11 @@ namespace ThanhDV.GameSaver.Core
             else
             {
                 savable.LoadData(saveData);
+            }
+
+            if (savable is ISavableLoaded savableLoaded)
+            {
+                savableLoaded.OnLoadCompleted(saveData);
             }
         }
 
@@ -267,6 +273,13 @@ namespace ThanhDV.GameSaver.Core
             }
             await Task.WhenAll(loadTasks);
 
+            foreach (ISavable savable in savableObjs)
+            {
+                if (savable is not ISavableLoaded savableLoaded) continue;
+
+                savableLoaded.OnLoadCompleted(saveData);
+            }
+
             Debug.Log($"<color=green>[GameSaver] Multi-file data loaded for profile: {curProfileId}</color>");
 
             async Task LoadAndApplyData(ISavable savable)
@@ -286,6 +299,13 @@ namespace ThanhDV.GameSaver.Core
             foreach (ISavable savable in savableObjs)
             {
                 savable.LoadData(saveData);
+            }
+
+            foreach (ISavable savable in savableObjs)
+            {
+                if (savable is not ISavableLoaded savableLoaded) continue;
+
+                savableLoaded.OnLoadCompleted(saveData);
             }
 
             Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");

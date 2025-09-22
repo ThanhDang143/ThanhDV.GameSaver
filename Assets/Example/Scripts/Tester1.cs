@@ -6,6 +6,30 @@ using Random = UnityEngine.Random;
 
 public class Tester1 : ISavable, IDisposable
 {
+    #region Singleton
+    private static Tester1 _instance;
+    private static readonly object _lock = new object();
+
+    public static Tester1 Instance
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (_instance == null)
+                {
+                    _instance = new Tester1();
+
+                    Debug.Log($"<color=yellow>{_instance.GetType().Name} instance is null!!! Auto create new instance!!!</color>");
+                }
+                return _instance;
+            }
+        }
+    }
+
+    public static bool IsExist => _instance != null;
+    #endregion
+
     private int intData;
     private float floatData;
     private Struct structData;
@@ -13,6 +37,13 @@ public class Tester1 : ISavable, IDisposable
     private List<Vector3> dictionaryDataValue;
 
     public Type SaveType => typeof(Tester1Data);
+
+    public static void Initialize()
+    {
+        if (IsExist) return;
+        var tester1 = Instance;
+        Debug.Log("Tester1 initialized!!!");
+    }
 
     public Tester1()
     {
@@ -59,6 +90,8 @@ public class Tester1 : ISavable, IDisposable
             dictionaryDataKey.Add(pair.Key);
             dictionaryDataValue.Add(pair.Value);
         }
+
+        Debug.Log("Tester1 loaded!!!");
     }
 
     public void SaveData(SaveData data)
@@ -75,6 +108,8 @@ public class Tester1 : ISavable, IDisposable
         {
             testerData.DictionaryData.Add(dictionaryDataKey[i], dictionaryDataValue[i]);
         }
+
+        Debug.Log("Tester1 saved!!!");
     }
 
     public class Tester1Data : ISaveData

@@ -67,10 +67,10 @@ public class PlayerData : ISaveData
 ```
 
 ### 3. Implement the ISavable Interface
-Any object that needs to be saved, whether it's a `MonoBehaviour` or a plain C# class, must implement the `ISavable` interface.
-
+- Any object that needs to be saved, whether it's a `MonoBehaviour` or a plain C# class, must implement the `ISavable` interface.
+- You can also implement `ISavableLoad` if you need to be notified when the data has been successfully loaded.
 ```csharp
-public class Player : ISavable
+public class Player : ISavable, ISavableLoad
 {
     // --- Player's runtime data ---
     private int level;
@@ -106,6 +106,15 @@ public class Player : ISavable
             playerData.Health = this.health;
             playerData.LastPosition = this.transform.position;
             playerData.Inventory = this.inventory;
+        }
+    }
+
+    // (Optional) 4. Implement the logic after load done.
+    public void OnLoadCompleted(SaveData data)
+    {
+        if (data.TryGetData(out PlayerData playerData))
+        {
+            // Do somethings
         }
     }
 }

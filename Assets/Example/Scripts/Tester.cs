@@ -18,15 +18,21 @@ public class Tester : MonoBehaviour, ISavable
 
     public Type SaveType => typeof(TesterData);
 
-    private void OnEnable()
+    private void Awake()
     {
-        SaveRegistry.Register(this);
+        GameSaver.WakeUp();
+        Tester1.Initialize();
     }
 
-    private void OnDisable()
-    {
-        SaveRegistry.Unregister(this);
-    }
+    // private void OnEnable()
+    // {
+    //     SaveRegistry.Register(this);
+    // }
+
+    // private void OnDisable()
+    // {
+    //     SaveRegistry.Unregister(this);
+    // }
 
     private void Update()
     {

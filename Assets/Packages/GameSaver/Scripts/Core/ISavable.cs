@@ -8,4 +8,9 @@ namespace ThanhDV.GameSaver.Core
         void SaveData(SaveData data);
         void LoadData(SaveData data);
     }
+
+    public interface ISavableLoaded
+    {
+        void OnLoadCompleted(SaveData data);
+    }
 }
