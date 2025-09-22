@@ -334,15 +334,15 @@ namespace ThanhDV.GameSaver.Core
             return null;
         }
 
-#if UNITY_ANDROID || UNITY_IOS
-        private async void OnApplicationPause(bool pauseStatus)
-        {
-            if (pauseStatus) await SaveGame();
-        }
-#elif UNITY_EDITOR
+#if UNITY_EDITOR
         private async void OnApplicationQuit()
         {
             await SaveGame();
+        }
+#elif UNITY_ANDROID || UNITY_IOS
+        private async void OnApplicationPause(bool pauseStatus)
+        {
+            if (pauseStatus) await SaveGame();
         }
 #else
         private async void OnApplicationQuit()
