@@ -1,24 +1,24 @@
 # GameSaver
 
-Lightweight save system for Unity featuring:
-- Multiple profiles (separate folders)
-- Auto-select most recently modified profile
-- Periodic Auto Save
-- AES encryption (GCM or fallback CBC + HMAC)
-- Safe backup / recovery
-- View and edit data in editor.
+A lightweight save system for Unity featuring:
+- Multiple profiles (separate folders).
+- Auto-selection of the most recently modified profile.
+- Periodic auto-saving.
+- AES encryption (GCM with a fallback to CBC + HMAC).
+- Safe backup and recovery mechanisms.
+- In-editor data viewing and editing.
 
 ---
 
 ## Installation
-### Unity Package Manager
+### Unity Package Manager (via Git URL)
 ```
 https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/GameSaver
 ```
 
 1. In Unity, open **Window** → **Package Manager**.
-2. Press the **+** button, choose "**Add package from git URL...**"
-3. Enter url above and press **Add**.
+2. Click the **+** button and select "**Add package from git URL...**"
+3. Paste the URL above and click **Add**.
 
 ### Scoped Registry
 
@@ -34,109 +34,162 @@ https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/Game
 
 ---
 
-## How to use
+## How to Use
 
 ### 1. Configure SaveSettings
-In Unity, open **Tools** → **GameSaver** → **SaveSettings**
-Key options:
-- Use Encryption: Turn encryption on/off.
-- File Name: Save file name inside each profile folder.
-- Enable Auto Save + Auto Save Time: Auto save interval.
+In Unity, navigate to **Tools** → **GameSaver** → **SaveSettings** to create and modify the settings asset.
 
-### 2. Switch / select profile
-```csharp
-GameSaver.Instance.SetProfileID("Player01"); // creates if not existing
-await GameSaver.Instance.LoadGame();         // loads that profile
-```
+**Options:**
+- `Create Profile If Null`: If no save data is found, automatically create a new profile with default settings.
+- `Use Encryption`: Toggles data encryption on or off.
+- `Save As Separate Files`: Determines whether to save all data into a single file or separate files for each module.
+- `Enable Auto Save` & `Auto Save Time`: Configures the automatic saving interval.
 
-### 3. Create fresh data
-```csharp
-GameSaver.Instance.NewGame(); // Clears in‑memory data (not yet written)
-GameSaver.Instance.SaveGame();
-```
-
-### 4. Create a savable component
-Implement `ISavable`:
+### 2. Create Data Container
+Create a class to hold save data by implementing the `ISaveData` interface. This class will contain the actual data you want to persist.
 
 ```csharp
-using UnityEngine;
-using ThanhDV.GameSaver.Core;
-
-public class PlayerStats : MonoBehaviour, ISavable
+public class PlayerData : ISaveData
 {
-    [SerializeField] int level;
-    [SerializeField] float hp;
+    public int Level { get; set; }
+    public float Health { get; set; }
+    public Vector3 LastPosition { get; set; }
+    public Dictionary<string, int> Inventory { get; set; }
 
-    // Data block
-    private class PlayerStatsData : ISaveData
+    public PlayerData()
     {
-        public int Level;
-        public float Hp;
-    }
-
-    // Write to SaveData
-    public void SaveData(SaveData data)
-    {
-        var block = data.TryGetData<PlayerStatsData>();
-        block.Level = level;
-        block.Hp = hp;
-    }
-
-    // Read from SaveData
-    public void LoadData(SaveData data)
-    {
-        var block = data.TryGetData<PlayerStatsData>();
-        level = block.Level;
-        hp = block.Hp;
+        Level = 1;
+        Health = 100f;
+        LastPosition = Vector3.zero;
+        Inventory = new Dictionary<string, int>();
     }
 }
 ```
 
-Registration is handled automatically by `SaveRegistry` (just have the component alive when saving/loading).
+### 3. Implement the ISavable Interface
+Any object that needs to be saved, whether it's a `MonoBehaviour` or a plain C# class, must implement the `ISavable` interface.
 
-### 5. Save & load
 ```csharp
-GameSaver.Instance.SaveGame();        // Save (internally may perform async I/O)
-await GameSaver.Instance.LoadGame();  // Reload
+public class Player : ISavable
+{
+    // --- Player's runtime data ---
+    private int level;
+    private float health;
+    private Vector3 position;
+    private Dictionary<string, int> inventory;
+
+    // 1. Specify the data container type created in the previous step.
+    public Type SaveType => typeof(PlayerData);
+
+    // 2. Implement the logic to load data from the container.
+    public void LoadData(SaveData data)
+    {
+        // Retrieve the specific data container from the global save data.
+        if (data.TryGetData(out PlayerData playerData))
+        {
+            // Apply the loaded data to this object's state.
+            this.level = playerData.Level;
+            this.health = playerData.Health;
+            this.transform.position = playerData.LastPosition;
+            this.inventory = playerData.Inventory;
+        }
+    }
+
+    // 3. Implement the logic to save data into the container.
+    public void SaveData(SaveData data)
+    {
+        // Retrieve the specific data container.
+        if (data.TryGetData(out PlayerData playerData))
+        {
+            // Update the container with this object's current state.
+            playerData.Level = this.level;
+            playerData.Health = this.health;
+            playerData.LastPosition = this.transform.position;
+            playerData.Inventory = this.inventory;
+        }
+    }
+}
 ```
 
-### 6. Delete a profile
+### 4. Register Objects with GameSaver
+To be included in the save/load process, each `ISavable` object must be registered.
+
+**For `MonoBehaviour` components:**
+Use `Awake` and `OnDestroy` for registration. This is the standard and safest approach.
 ```csharp
-GameSaver.Instance.DeleteData("Player01");
+public class Player : MonoBehaviour, ISavable
+{
+    private void Awake()
+    {
+        SaveRegistry.Register(this);
+    }
+
+    private void OnDestroy()
+    {
+        SaveRegistry.Unregister(this);
+    }
+    // ... ISavable implementation ...
+}
 ```
 
-### 7. List / load all profiles
+**For `non-MonoBehaviour` (plain C#) classes:**
+Implement `IDisposable` and register in the constructor.
 ```csharp
-Dictionary<string, SaveData> all = await GameSaver.Instance.LoadAll();
+public class Player : ISavable, IDisposable
+{
+    public PlayerStats()
+    {
+        SaveRegistry.Register(this);
+    }
+
+    public void Dispose()
+    {
+        SaveRegistry.Unregister(this);
+    }
+    // ... ISavable implementation ...
+}
 ```
+⚠️ **Important:** For `non-MonoBehaviour` classes, you are responsible for calling `Dispose()` manually when the object is no longer needed. The C# garbage collector does not call `Dispose()` automatically.
 
----
-
-## Internal flow
-
-1. `GameSaver` initializes -> reads `SaveSettings`
-2. Resolves current profile (most recent or default)
-3. Loads game -> invokes `LoadData` on every `ISavable`
-4. Starts Auto Save loop (if enabled)
-5. On save: aggregates data -> writes temp file, backup, replace
-
----
-
-## Encryption
-
-- AES-GCM if available, fallback AES-CBC + HMAC-SHA256
-- Stable passphrase (optionally device-bound)
-- Can be disabled for debugging
-
----
-
-## Quick API
+### 5. Interacting with GameSaver
+Use the `GameSaver.Instance` singleton to manage save/load operations.
 
 ```csharp
+// Initialize GameSaver. This happens automatically if you have prefab GameSaver in scene.
+// You can call this explicitly in a startup script to ensure it's ready.
+GameSaver.WakeUp();
+
+// Create a new game.
+GameSaver.Instance.NewGame(); // Uses the current or default profile ID.
+GameSaver.Instance.NewGame("Profile_Slot_1"); // Specifies a custom profile ID.
+
+// Save the current game state.
 GameSaver.Instance.SaveGame();
-await GameSaver.Instance.LoadGame();
-GameSaver.Instance.NewGame();
-GameSaver.Instance.SetProfileID("ProfileX");
-GameSaver.Instance.DeleteData("ProfileX");
-var all = await GameSaver.Instance.LoadAll();
+
+// Load the game state.
+await GameSaver.Instance.LoadGame(); // Loads the current profile.
+
+// Load all existing profiles.
+Dictionary<string, SaveData> allProfiles = await GameSaver.Instance.LoadAllProfile();
+
+// Switch to a different profile.
+GameSaver.Instance.SetProfileID("Profile_Slot_2");
+await GameSaver.Instance.LoadGame(); // Load data from the new profile's data.
+// GameSaver.Instance.SaveGame(); // Save current data to the new profile.
+
+// Delete a profile.
+GameSaver.Instance.DeleteData("Profile_Slot_1");
 ```
+⚠️ **Key Points:**
+- Always ensure `GameSaver` is initialized before calling methods like `NewGame`, `SaveGame`, or `LoadGame`...
+- If `Create Profile If Null` is disabled, you must call `NewGame()` at least once before `SaveGame()` or `LoadGame()` can succeed.
+- After calling `SetProfileID()`, you typically want to call `LoadGame()` to load the new profile's data. Or call `SaveGame()` to save current data to the new profile.
+- After `DeleteData()`, the system automatically switches to the most recently used profile or the default profile.
+- By default, data is loaded when `GameSaver` initializes and saved when the application quits (or is paused on Android/iOS).
+
+## Other Information
+### Encryption
+
+- Uses AES-GCM if available, with a fallback to AES-CBC + HMAC-SHA256 for broader compatibility.
+- Employs a stable passphrase that can be optionally bound to the device for added security.
+- Encryption can be disabled in the `SaveSettings` for easier debugging.

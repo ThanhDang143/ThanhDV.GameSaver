@@ -382,7 +382,7 @@ namespace ThanhDV.GameSaver.Core
             if (saveSettings.CreateProfileIfNull)
             {
                 Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
-                NewGame(Constant.DEFAULT_PROFILE_ID);
+                NewGame(curProfileId);
             }
             else
             {

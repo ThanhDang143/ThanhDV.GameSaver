@@ -24,7 +24,6 @@ public class Tester1 : ISavable, IDisposable
         SaveRegistry.Unregister(this);
     }
 
-    [ContextMenu("Random Value")]
     private void RandomValue()
     {
         intData = Random.Range(-100, 100);
