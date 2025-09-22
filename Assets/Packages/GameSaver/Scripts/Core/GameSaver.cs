@@ -88,12 +88,11 @@ namespace ThanhDV.GameSaver.Core
             InitializeProfile();
             SaveRegistry.Bind(Register, Unregister);
 
-            await LoadGame();
+            await InternalLoadGame();
 
             StartAutoSave();
 
             Debug.Log("<color=green>[GameSaver] Initialized done!!!</color>");
-
         }
 
         private void InitializeDataHandler()
@@ -174,12 +173,7 @@ namespace ThanhDV.GameSaver.Core
         public async Task NewGame(string profileId = null)
         {
             await initializationTask;
-
-            saveData = new SaveData();
-            string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
-            SetProfileID(id);
-
-            Debug.Log($"<color=green>[GameSaver] Created new game with profile: {id}!!!</color>");
+            InternalNewGame(profileId);
         }
 
         #endregion
@@ -189,7 +183,7 @@ namespace ThanhDV.GameSaver.Core
         {
             await initializationTask;
 
-            if (!await TryCreateProfileIfNull()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
             else SaveAsAIO();
@@ -262,20 +256,12 @@ namespace ThanhDV.GameSaver.Core
         public async Task LoadGame()
         {
             await initializationTask;
-
-            if (saveSettings.SaveAsSeparateFiles)
-            {
-                await LoadFromMultiFile();
-            }
-            else
-            {
-                await LoadFromSingleFile();
-            }
+            await InternalLoadGame();
         }
 
         private async Task LoadFromMultiFile()
         {
-            if (!await TryCreateProfileIfNull()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             List<Task> loadTasks = new();
             foreach (ISavable savable in savableObjs)
@@ -305,7 +291,7 @@ namespace ThanhDV.GameSaver.Core
         {
             saveData = await dataHandler.Read<SaveData>(curProfileId);
 
-            if (!await TryCreateProfileIfNull()) return;
+            if (!TryCreateProfileIfNull()) return;
 
             foreach (ISavable savable in savableObjs)
             {
@@ -364,6 +350,35 @@ namespace ThanhDV.GameSaver.Core
 #endif
         #endregion
 
+        #region Internal Method
+        /// <summary>
+        /// Worker method for NewGame. Doesn't wait for initialization.
+        /// </summary>
+        private void InternalNewGame(string profileId = null)
+        {
+            saveData = new SaveData();
+            string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
+            SetProfileID(id);
+
+            Debug.Log($"<color=green>[GameSaver] Created new game with profile: {id}!!!</color>");
+        }
+
+        /// <summary>
+        /// Worker method for LoadGame. Doesn't wait for initialization.
+        /// </summary>
+        private async Task InternalLoadGame()
+        {
+            if (saveSettings.SaveAsSeparateFiles)
+            {
+                await LoadFromMultiFile();
+            }
+            else
+            {
+                await LoadFromSingleFile();
+            }
+        }
+        #endregion
+
         #region Helper
         public void SetProfileID(string id)
         {
@@ -387,10 +402,8 @@ namespace ThanhDV.GameSaver.Core
         /// Ensure save data exists; creates default profile if allowed.
         /// </summary>
         /// <returns> true if data already existed or was created; otherwise false.</returns> 
-        private async Task<bool> TryCreateProfileIfNull()
+        private bool TryCreateProfileIfNull()
         {
-            await initializationTask;
-
             if (saveSettings.SaveAsSeparateFiles)
             {
                 if (HasAnySaveFiles()) return true;
@@ -403,7 +416,7 @@ namespace ThanhDV.GameSaver.Core
             if (saveSettings.CreateProfileIfNull)
             {
                 Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
-                await NewGame(curProfileId);
+                InternalNewGame(curProfileId);
             }
             else
             {

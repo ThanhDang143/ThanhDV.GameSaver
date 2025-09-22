@@ -1,6 +1,6 @@
 {
     "name": "thanhdv.gamesaver",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "displayName": "ThanhDV's GameSaver",
     "description": "Lightweight save system for Unity.",
     "unity": "2022.3",

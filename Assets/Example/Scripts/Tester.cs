@@ -33,13 +33,13 @@ public class Tester : MonoBehaviour, ISavable
         if (Input.GetKeyDown(KeyCode.A))
         {
             GameSaver.Instance.SetProfileID("PROFILE A");
-            GameSaver.Instance.SaveGame();
+            _ = GameSaver.Instance.SaveGame();
         }
 
         if (Input.GetKeyDown(KeyCode.B))
         {
             GameSaver.Instance.SetProfileID("PROFILE B");
-            GameSaver.Instance.SaveGame();
+            _ = GameSaver.Instance.SaveGame();
         }
 
         if (Input.GetKeyDown(KeyCode.C))
@@ -54,7 +54,7 @@ public class Tester : MonoBehaviour, ISavable
 
         if (Input.GetKeyDown(KeyCode.N))
         {
-            GameSaver.Instance.NewGame(profile);
+            _ = GameSaver.Instance.NewGame(profile);
         }
     }
 
