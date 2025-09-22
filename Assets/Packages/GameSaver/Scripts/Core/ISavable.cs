@@ -11,6 +11,6 @@ namespace ThanhDV.GameSaver.Core
 
     public interface ISavableLoaded
     {
-        void OnLoadCompleted();
+        void OnLoadCompleted(SaveData data);
     }
 }

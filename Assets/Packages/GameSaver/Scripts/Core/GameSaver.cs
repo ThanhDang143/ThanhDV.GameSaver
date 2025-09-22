@@ -146,7 +146,7 @@ namespace ThanhDV.GameSaver.Core
 
             if (savable is ISavableLoaded savableLoaded)
             {
-                savableLoaded.OnLoadCompleted();
+                savableLoaded.OnLoadCompleted(saveData);
             }
         }
 
@@ -276,7 +276,7 @@ namespace ThanhDV.GameSaver.Core
             {
                 if (savable is not ISavableLoaded savableLoaded) continue;
 
-                savableLoaded.OnLoadCompleted();
+                savableLoaded.OnLoadCompleted(saveData);
             }
 
             Debug.Log($"<color=green>[GameSaver] Multi-file data loaded for profile: {curProfileId}</color>");
@@ -297,22 +297,17 @@ namespace ThanhDV.GameSaver.Core
 
             foreach (ISavable savable in savableObjs)
             {
-                ApplyData(savable);
+                savable.LoadData(saveData);
             }
 
             foreach (ISavable savable in savableObjs)
             {
                 if (savable is not ISavableLoaded savableLoaded) continue;
 
-                savableLoaded.OnLoadCompleted();
+                savableLoaded.OnLoadCompleted(saveData);
             }
 
             Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");
-
-            void ApplyData(ISavable savable)
-            {
-                savable.LoadData(saveData);
-            }
         }
 
         private async Task<ISaveData> LoadModule(string moduleKey)
