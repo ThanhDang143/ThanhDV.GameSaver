@@ -196,6 +196,41 @@ GameSaver.Instance.DeleteData("Profile_Slot_1");
 - After `DeleteData()`, the system automatically switches to the most recently used profile or the default profile.
 - By default, data is loaded when `GameSaver` initializes and saved when the application quits (or is paused on Android/iOS).
 
+### 6. Others
+#### Wait until data is loaded
+```csharp
+// Use when running the game for the first time. Data is automatically loaded by the system
+// and this completes after data is applied to all ISavable and OnLoadCompleted is called.
+await GameSaver.Instance.WhenInitialized;
+DoSomething();
+
+// Use when you manually trigger a game load
+await GameSaver.Instance.LoadGame();
+DoSomething();
+
+// For other systems that need to observe this event
+GameSaver.Instance.OnLoadDataCompleted += DoSomething; // Subscribe
+GameSaver.Instance.OnLoadDataCompleted -= DoSomething; // Unsubscribe
+```
+#### Save/Load Events
+```csharp
+// Called when data loading starts
+GameSaver.Instance.OnLoadDataStarted += DoSomething; // Subscribe
+GameSaver.Instance.OnLoadDataStarted -= DoSomething; // Unsubscribe
+
+// Called when data loading is complete
+GameSaver.Instance.OnLoadDataCompleted += DoSomething; // Subscribe
+GameSaver.Instance.OnLoadDataCompleted -= DoSomething; // Unsubscribe
+
+// Called when data saving starts
+GameSaver.Instance.OnSaveDataStarted += DoSomething; // Subscribe
+GameSaver.Instance.OnSaveDataStarted -= DoSomething; // Unsubscribe
+
+// Called when data saving is complete
+GameSaver.Instance.OnSaveDataCompleted += DoSomething; // Subscribe
+GameSaver.Instance.OnSaveDataCompleted -= DoSomething; // Unsubscribe
+```
+
 ## Other Information
 ### Encryption
 

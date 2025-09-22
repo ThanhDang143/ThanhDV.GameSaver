@@ -7,6 +7,7 @@ using UnityEngine.AddressableAssets;
 using System.IO;
 using System.Linq;
 using ThanhDV.GameSaver.CustomAttribute;
+using System;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -70,14 +71,94 @@ namespace ThanhDV.GameSaver.Core
         private readonly HashSet<ISavable> savableObjs = new();
         private IDataHandler dataHandler;
         private Coroutine autoSaveCoroutine;
-        private Task initializationTask;
 
-        private const float TimeToWaitSaveSettings = 3f;
+        #region Events
+
+        private TaskCompletionSource<bool> initializationTCS;
+        public Task WhenInitialized => initializationTCS?.Task ?? Task.CompletedTask;
+
+        public static event Action<LoadStartArgs> OnLoadDataStarted;
+        public static event Action<LoadCompleteArgs> OnLoadDataCompleted;
+        public static event Action<SaveStartArgs> OnSaveDataStarted;
+        public static event Action<SaveCompleteArgs> OnSaveDataCompleted;
+
+        public sealed class LoadStartArgs : EventArgs
+        {
+            public string ProfileId { get; }
+
+            public LoadStartArgs(string profileId)
+            {
+                ProfileId = profileId;
+            }
+        }
+
+        public sealed class LoadCompleteArgs : EventArgs
+        {
+            public string ProfileId { get; }
+            public SaveData Data { get; }
+
+            public LoadCompleteArgs(string profileId, SaveData data)
+            {
+                ProfileId = profileId;
+                Data = data;
+            }
+        }
+
+        public sealed class SaveStartArgs : EventArgs
+        {
+            public string ProfileId { get; }
+            public SaveData Data { get; }
+
+            public SaveStartArgs(string profileId, SaveData data)
+            {
+                ProfileId = profileId;
+                Data = data;
+            }
+        }
+
+        public sealed class SaveCompleteArgs : EventArgs
+        {
+            public string ProfileId { get; }
+            public bool IsSuccess { get; }
+
+            public SaveCompleteArgs(string profileId, bool isSuccess)
+            {
+                ProfileId = profileId;
+                IsSuccess = isSuccess;
+            }
+        }
+
+        private void RaiseLoadStarted()
+        {
+            LoadStartArgs args = new(curProfileId);
+            OnLoadDataStarted?.Invoke(args);
+        }
+
+        private void RaiseLoadCompleted()
+        {
+            LoadCompleteArgs args = new(curProfileId, saveData);
+            OnLoadDataCompleted?.Invoke(args);
+        }
+
+        private void RaiseSaveStarted()
+        {
+            SaveStartArgs args = new(curProfileId, saveData);
+            OnSaveDataStarted?.Invoke(args);
+        }
+
+        private void RaiseSaveCompleted(bool isSuccess)
+        {
+            SaveCompleteArgs args = new(curProfileId, isSuccess);
+            OnSaveDataCompleted?.Invoke(args);
+        }
+
+        #endregion
 
         #region Initialization
         private void Initialize()
         {
-            initializationTask = InitializeAsync();
+            initializationTCS = new TaskCompletionSource<bool>();
+            _ = InitializeAsync();
         }
 
         private async Task InitializeAsync()
@@ -88,12 +169,14 @@ namespace ThanhDV.GameSaver.Core
             InitializeProfile();
 
             await InternalLoadGame();
-            
+
             SaveRegistry.Bind(Register, Unregister);
 
             StartAutoSave();
 
             Debug.Log("<color=green>[GameSaver] Initialized done!!!</color>");
+
+            initializationTCS.TrySetResult(true);
         }
 
         private void InitializeDataHandler()
@@ -173,7 +256,7 @@ namespace ThanhDV.GameSaver.Core
         #region NewGame
         public async Task NewGame(string profileId = null)
         {
-            await initializationTask;
+            await WhenInitialized;
             InternalNewGame(profileId);
         }
 
@@ -182,12 +265,28 @@ namespace ThanhDV.GameSaver.Core
         #region SaveGame
         public async Task SaveGame()
         {
-            await initializationTask;
+            await WhenInitialized;
 
             if (!TryCreateProfileIfNull()) return;
 
-            if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
-            else SaveAsAIO();
+            RaiseSaveStarted();
+
+            bool success = true;
+            try
+            {
+                if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
+                else SaveAsAIO();
+            }
+            catch (Exception e)
+            {
+                Debug.Log($"<color=red>[GameSaver] Save failed for profile {curProfileId}!!!</color>\n{e}");
+                success = false;
+            }
+            finally
+            {
+                RaiseSaveCompleted(success);
+            }
+
 
             void SaveAsAIO()
             {
@@ -251,14 +350,14 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task<Dictionary<string, SaveData>> LoadAllProfile()
         {
-            await initializationTask;
+            await WhenInitialized;
             Dictionary<string, SaveData> gameDatas = await dataHandler.ReadAllProfile();
             return gameDatas;
         }
 
         public async Task LoadGame()
         {
-            await initializationTask;
+            await WhenInitialized;
             await InternalLoadGame();
         }
 
@@ -366,6 +465,8 @@ namespace ThanhDV.GameSaver.Core
         /// </summary>
         private async Task InternalLoadGame()
         {
+            RaiseLoadStarted();
+
             if (saveSettings.SaveAsSeparateFiles)
             {
                 await LoadFromMultiFile();
@@ -374,6 +475,8 @@ namespace ThanhDV.GameSaver.Core
             {
                 await LoadFromSingleFile();
             }
+
+            RaiseLoadCompleted();
         }
         #endregion
 
@@ -385,7 +488,7 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task DeleteData(string profileId)
         {
-            await initializationTask;
+            await WhenInitialized;
             dataHandler.Delete(profileId);
             InitializeProfile();
             await LoadGame();
