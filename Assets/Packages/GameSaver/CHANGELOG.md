@@ -1,6 +1,9 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.0.4] - 2025-09-22
+- Ensure SaveSettings is ready.
+
 ## [1.0.2] - 2025-09-22
 - Fix Header Attribute
 - Update How to Use

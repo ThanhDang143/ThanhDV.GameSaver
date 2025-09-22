@@ -70,16 +70,19 @@ namespace ThanhDV.GameSaver.Core
         private readonly HashSet<ISavable> savableObjs = new();
         private IDataHandler dataHandler;
         private Coroutine autoSaveCoroutine;
+        private Task initializationTask;
+
+        private const float TimeToWaitSaveSettings = 3f;
 
         #region Initialization
-        private async void Initialize()
+        private void Initialize()
+        {
+            initializationTask = InitializeAsync();
+        }
+
+        private async Task InitializeAsync()
         {
             bool loadSettingsSuccess = await TryLoadSettings();
-            if (saveSettings == null)
-            {
-                Debug.Log("<color=red>[GameSaver] SaveSettings is not assigned. Please assign a SaveSettings asset!!!</color>");
-                return;
-            }
 
             InitializeDataHandler();
             InitializeProfile();
@@ -113,9 +116,17 @@ namespace ThanhDV.GameSaver.Core
             var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_NAME);
             saveSettings = await handle.Task;
 
-            handle.Release();
+            if (saveSettings == null)
+            {
+                Debug.LogWarning($"<color=red>[GameSaver] Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_NAME}' asset exists and is configured in Addressables!!!</color>");
+                saveSettings = ScriptableObject.CreateInstance<SaveSettings>();
+            }
+            else
+            {
+                handle.Release();
+            }
 
-            return saveSettings != null;
+            return true;
         }
 
         private async void Register(ISavable savable)
@@ -160,8 +171,10 @@ namespace ThanhDV.GameSaver.Core
         #endregion
 
         #region NewGame
-        public void NewGame(string profileId = null)
+        public async Task NewGame(string profileId = null)
         {
+            await initializationTask;
+
             saveData = new SaveData();
             string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
             SetProfileID(id);
@@ -172,9 +185,11 @@ namespace ThanhDV.GameSaver.Core
         #endregion
 
         #region SaveGame
-        public void SaveGame()
+        public async Task SaveGame()
         {
-            if (!TryCreateProfileIfNull()) return;
+            await initializationTask;
+
+            if (!await TryCreateProfileIfNull()) return;
 
             if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
             else SaveAsAIO();
@@ -228,7 +243,8 @@ namespace ThanhDV.GameSaver.Core
             while (true)
             {
                 yield return new WaitForSecondsRealtime(saveSettings.AutoSaveTime);
-                SaveGame();
+                Task saveTask = SaveGame();
+                yield return new WaitUntil(() => saveTask.IsCompleted);
                 Debug.Log("<color=green>[GameSaver] AutoSave called!!!</color>");
             }
         }
@@ -238,12 +254,15 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task<Dictionary<string, SaveData>> LoadAllProfile()
         {
+            await initializationTask;
             Dictionary<string, SaveData> gameDatas = await dataHandler.ReadAllProfile();
             return gameDatas;
         }
 
         public async Task LoadGame()
         {
+            await initializationTask;
+
             if (saveSettings.SaveAsSeparateFiles)
             {
                 await LoadFromMultiFile();
@@ -256,7 +275,7 @@ namespace ThanhDV.GameSaver.Core
 
         private async Task LoadFromMultiFile()
         {
-            if (!TryCreateProfileIfNull()) return;
+            if (!await TryCreateProfileIfNull()) return;
 
             List<Task> loadTasks = new();
             foreach (ISavable savable in savableObjs)
@@ -286,7 +305,7 @@ namespace ThanhDV.GameSaver.Core
         {
             saveData = await dataHandler.Read<SaveData>(curProfileId);
 
-            if (!TryCreateProfileIfNull()) return;
+            if (!await TryCreateProfileIfNull()) return;
 
             foreach (ISavable savable in savableObjs)
             {
@@ -328,14 +347,19 @@ namespace ThanhDV.GameSaver.Core
         }
 
 #if UNITY_ANDROID || UNITY_IOS
-        private void OnApplicationPause(bool pauseStatus)
+        private async void OnApplicationPause(bool pauseStatus)
         {
-            if (pauseStatus) SaveGame();
+            if (pauseStatus) await SaveGame();
+        }
+#elif UNITY_EDITOR
+        private async void OnApplicationQuit()
+        {
+            await SaveGame();
         }
 #else
-        private void OnApplicationQuit()
+        private async void OnApplicationQuit()
         {
-            SaveGame();
+            await SaveGame();
         }
 #endif
         #endregion
@@ -346,11 +370,12 @@ namespace ThanhDV.GameSaver.Core
             curProfileId = id;
         }
 
-        public void DeleteData(string profileId)
+        public async Task DeleteData(string profileId)
         {
+            await initializationTask;
             dataHandler.Delete(profileId);
             InitializeProfile();
-            _ = LoadGame();
+            await LoadGame();
         }
 
         private string GetMostRecentProfile()
@@ -362,13 +387,9 @@ namespace ThanhDV.GameSaver.Core
         /// Ensure save data exists; creates default profile if allowed.
         /// </summary>
         /// <returns> true if data already existed or was created; otherwise false.</returns> 
-        private bool TryCreateProfileIfNull()
+        private async Task<bool> TryCreateProfileIfNull()
         {
-            if (saveSettings == null)
-            {
-                Debug.Log($"<color=red>[GameSaver] SaveSettings not found. Please initialize GameSaver first!!!</color>");
-                return false;
-            }
+            await initializationTask;
 
             if (saveSettings.SaveAsSeparateFiles)
             {
@@ -382,7 +403,7 @@ namespace ThanhDV.GameSaver.Core
             if (saveSettings.CreateProfileIfNull)
             {
                 Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
-                NewGame(curProfileId);
+                await NewGame(curProfileId);
             }
             else
             {
