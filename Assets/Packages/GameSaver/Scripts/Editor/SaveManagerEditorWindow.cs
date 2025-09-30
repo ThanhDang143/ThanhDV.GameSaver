@@ -380,7 +380,7 @@ namespace ThanhDV.GameSaver
                 try
                 {
                     SaveData saveData = dataToSave.ToObject<SaveData>(JsonSerializer.Create(JsonUtilities.UnityJsonSettings));
-                    await dataHandler.Write(saveData, profileId);
+                    await dataHandler.WriteAsync(saveData, profileId);
                     EditorUtility.DisplayDialog("Save Successful", $"The save file for profile '{profileId}' was updated successfully.", "OK");
                     hasDataUnsaved = false;
                 }

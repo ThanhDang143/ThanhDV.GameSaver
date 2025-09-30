@@ -39,13 +39,13 @@ public class Tester : MonoBehaviour, ISavable
         if (Input.GetKeyDown(KeyCode.A))
         {
             GameSaver.Instance.SetProfileID("PROFILE A");
-            _ = GameSaver.Instance.SaveGame();
+            _ = GameSaver.Instance.SaveGameAsync();
         }
 
         if (Input.GetKeyDown(KeyCode.B))
         {
             GameSaver.Instance.SetProfileID("PROFILE B");
-            _ = GameSaver.Instance.SaveGame();
+            _ = GameSaver.Instance.SaveGameAsync();
         }
 
         if (Input.GetKeyDown(KeyCode.C))
