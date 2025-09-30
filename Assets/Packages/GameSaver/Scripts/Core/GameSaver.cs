@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using ThanhDV.GameSaver.CustomAttribute;
 using System;
+using System.Threading;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -263,10 +264,98 @@ namespace ThanhDV.GameSaver.Core
         #endregion
 
         #region SaveGame
-        public async Task SaveGame()
+        private enum SaveMode
+        {
+            Async,
+            Immediate
+        }
+
+        private readonly SemaphoreSlim _saveSemaphore = new(1, 1);
+
+        // Coalesce state
+        private readonly object _saveCoalesceLock = new();
+        private bool _isSavingSequence;
+        private bool _saveRequestedDuringSave;
+        private SaveMode _nextMode = SaveMode.Async;
+        private TaskCompletionSource<bool> _coalescedSaveTcs;
+
+        public async Task SaveGameAsync()
         {
             await WhenInitialized;
+            await RequestCoalescedSave(SaveMode.Async);
+        }
 
+        public async Task SaveGameImmediate()
+        {
+            await WhenInitialized;
+            await RequestCoalescedSave(SaveMode.Immediate);
+        }
+
+        private Task RequestCoalescedSave(SaveMode mode)
+        {
+            lock (_saveCoalesceLock)
+            {
+                if (mode == SaveMode.Immediate)
+                    _nextMode = SaveMode.Immediate;
+
+                if (_isSavingSequence)
+                {
+                    _saveRequestedDuringSave = true;
+                    return _coalescedSaveTcs.Task;
+                }
+
+                _isSavingSequence = true;
+                _saveRequestedDuringSave = false;
+                _coalescedSaveTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _ = RunSaveSequence();
+                return _coalescedSaveTcs.Task;
+            }
+        }
+
+        private async Task RunSaveSequence()
+        {
+            while (true)
+            {
+                SaveMode modeToRun;
+                lock (_saveCoalesceLock)
+                {
+                    modeToRun = _nextMode;
+                }
+
+                await SaveGameEnqueued(modeToRun);
+
+                lock (_saveCoalesceLock)
+                {
+                    if (_saveRequestedDuringSave)
+                    {
+                        _saveRequestedDuringSave = false;
+                        continue;
+                    }
+
+                    _isSavingSequence = false;
+                    _coalescedSaveTcs.TrySetResult(true);
+
+                    _nextMode = SaveMode.Async;
+                    return;
+                }
+            }
+        }
+
+        private async Task SaveGameEnqueued(SaveMode mode)
+        {
+            await _saveSemaphore.WaitAsync();
+            try
+            {
+                await SaveGameInternal(mode);
+            }
+            finally
+            {
+                _saveSemaphore.Release();
+            }
+        }
+
+        private async Task SaveGameInternal(SaveMode mode)
+        {
             if (!TryCreateProfileIfNull()) return;
 
             RaiseSaveStarted();
@@ -274,8 +363,10 @@ namespace ThanhDV.GameSaver.Core
             bool success = true;
             try
             {
-                if (saveSettings.SaveAsSeparateFiles) SaveAsSeparate();
-                else SaveAsAIO();
+                if (saveSettings.SaveAsSeparateFiles)
+                    await SaveAllModules(mode);
+                else
+                    await SaveAllInOne(mode);
             }
             catch (Exception e)
             {
@@ -286,43 +377,50 @@ namespace ThanhDV.GameSaver.Core
             {
                 RaiseSaveCompleted(success);
             }
+        }
 
-
-            void SaveAsAIO()
+        private async Task SaveAllInOne(SaveMode mode)
+        {
+            foreach (ISavable savable in savableObjs)
             {
-                foreach (ISavable savable in savableObjs)
-                {
-                    savable.SaveData(saveData);
-                }
-
-                dataHandler.Write(saveData, curProfileId);
-                Debug.Log("<color=green>[GameSaver] SaveAIO called!!!</color>");
+                savable.SaveData(saveData);
             }
 
-            void SaveAsSeparate()
-            {
-                foreach (ISavable savable in savableObjs)
-                {
-                    string moduleKey = savable.SaveType.Name;
-                    savable.SaveData(saveData);
+            if (mode == SaveMode.Immediate)
+                dataHandler.WriteImmediate(saveData, curProfileId);
+            else
+                await dataHandler.WriteAsync(saveData, curProfileId);
 
-                    SaveModule(moduleKey);
-                    Debug.Log($"<color=green>[GameSaver] Save {moduleKey} called!!!</color>");
-                }
+            Debug.Log("<color=green>[GameSaver] SaveAIO called!!!</color>");
+        }
+
+        private async Task SaveAllModules(SaveMode mode)
+        {
+            foreach (ISavable savable in savableObjs)
+            {
+                string moduleKey = savable.SaveType.Name;
+                savable.SaveData(saveData);
+                await SaveModuleInternal(moduleKey, mode);
+                Debug.Log($"<color=green>[GameSaver] Save {moduleKey} called!!!</color>");
             }
         }
 
-        private void SaveModule(string moduleKey)
+        private Task SaveModuleInternal(string moduleKey, SaveMode mode)
         {
             saveData ??= new();
-            saveData.TryGetData(moduleKey, out ISaveData data);
-            if (data == null)
+            if (!saveData.TryGetData(moduleKey, out ISaveData data) || data == null)
             {
                 Debug.Log($"<color=red>[GameSaver] SaveModule({moduleKey}) called with null data!!!</color>");
-                return;
+                return Task.CompletedTask;
             }
 
-            dataHandler.WriteModule(data, moduleKey, curProfileId);
+            if (mode == SaveMode.Immediate)
+            {
+                dataHandler.WriteModuleImmediate(data, moduleKey, curProfileId);
+                return Task.CompletedTask;
+            }
+
+            return dataHandler.WriteModuleAsync(data, moduleKey, curProfileId);
         }
 
         private void StartAutoSave()
@@ -339,7 +437,7 @@ namespace ThanhDV.GameSaver.Core
             while (true)
             {
                 yield return new WaitForSecondsRealtime(saveSettings.AutoSaveTime);
-                Task saveTask = SaveGame();
+                Task saveTask = SaveGameAsync();
                 yield return new WaitUntil(() => saveTask.IsCompleted);
                 Debug.Log("<color=green>[GameSaver] AutoSave called!!!</color>");
             }
@@ -432,17 +530,17 @@ namespace ThanhDV.GameSaver.Core
 #if UNITY_EDITOR
         private async void OnApplicationQuit()
         {
-            await SaveGame();
+            await SaveGameImmediate();
         }
 #elif UNITY_ANDROID || UNITY_IOS
         private async void OnApplicationPause(bool pauseStatus)
         {
-            if (pauseStatus) await SaveGame();
+            if (pauseStatus) await SaveGameImmediate();
         }
 #else
         private async void OnApplicationQuit()
         {
-            await SaveGame();
+            await SaveGameImmediate();
         }
 #endif
         #endregion

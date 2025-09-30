@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2025-09-30
+- Fix save logic (add SaveImmediate/SaveAsync)
+- Prevents consecutive rapid save calls from overlapping/overwriting each other
+
 ## [1.1.0] - 2025-09-22
 - Add Save/Load events
 

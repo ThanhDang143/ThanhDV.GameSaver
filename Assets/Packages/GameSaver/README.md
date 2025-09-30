@@ -7,6 +7,7 @@ A lightweight save system for Unity featuring:
 - AES encryption (GCM with a fallback to CBC + HMAC).
 - Safe backup and recovery mechanisms.
 - In-editor data viewing and editing.
+- Prevents consecutive rapid save calls from overlapping/overwriting each other
 
 ---
 
@@ -173,7 +174,8 @@ GameSaver.Instance.NewGame(); // Uses the current or default profile ID.
 GameSaver.Instance.NewGame("Profile_Slot_1"); // Specifies a custom profile ID.
 
 // Save the current game state.
-GameSaver.Instance.SaveGame();
+GameSaver.Instance.SaveGameAsync();
+GameSaver.Instance.SaveGameImmediate();
 
 // Load the game state.
 await GameSaver.Instance.LoadGame(); // Loads the current profile.

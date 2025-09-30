@@ -164,22 +164,22 @@ namespace ThanhDV.GameSaver.Core
         }
         #endregion
 
-        #region Write
-        public async Task Write(SaveData data, string profileId)
+        #region Write Async
+        public async Task WriteAsync(SaveData data, string profileId)
         {
             if (saveAsSeparateFiles)
             {
-                var writeTasks = data.GetDataModules().Select(kvp => WriteModule(kvp.Value, kvp.Key, profileId));
+                var writeTasks = data.GetDataModules().Select(kvp => WriteModuleAsync(kvp.Value, kvp.Key, profileId));
                 await Task.WhenAll(writeTasks);
             }
             else
             {
                 string profilePath = Path.Combine(filePath, profileId);
-                await WriteObject(data, fileName, profilePath);
+                await WriteObjectAsync(data, fileName, profilePath);
             }
         }
 
-        public async Task WriteModule(ISaveData data, string moduleKey, string profileId)
+        public async Task WriteModuleAsync(ISaveData data, string moduleKey, string profileId)
         {
             if (!saveAsSeparateFiles)
             {
@@ -191,10 +191,10 @@ namespace ThanhDV.GameSaver.Core
             string fileExtention = this.fileName.Split('.')[^1];
             string fileName = $"{moduleKey}.{fileExtention}";
 
-            await WriteObject(data, fileName, profilePath);
+            await WriteObjectAsync(data, fileName, profilePath);
         }
 
-        private async Task WriteObject(object data, string fileName, string profilePath)
+        private async Task WriteObjectAsync(object data, string fileName, string profilePath)
         {
             if (data == null)
             {
@@ -219,6 +219,85 @@ namespace ThanhDV.GameSaver.Core
                 }
 
                 await File.WriteAllTextAsync(tempPath, dataToSave);
+
+                if (File.Exists(fullPath))
+                {
+                    File.Replace(tempPath, fullPath, backupPath);
+                }
+                else
+                {
+                    File.Move(tempPath, fullPath);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.Log("<color=red>[GameSaver] Fail to SAVE data!!! </color>\n" + e);
+            }
+            finally
+            {
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+            }
+        }
+        #endregion
+
+        #region Write Immediate
+        public void WriteImmediate(SaveData data, string profileId)
+        {
+            if (saveAsSeparateFiles)
+            {
+                Dictionary<string, ISaveData> modules = data.GetDataModules();
+                foreach (var module in modules)
+                {
+                    WriteModuleImmediate(module.Value, module.Key, profileId);
+                }
+            }
+            else
+            {
+                string profilePath = Path.Combine(filePath, profileId);
+                WriteObjectImmediate(data, fileName, profilePath);
+            }
+        }
+
+        public void WriteModuleImmediate(ISaveData data, string moduleKey, string profileId)
+        {
+            if (!saveAsSeparateFiles)
+            {
+                Debug.Log("<color=yellow>[GameSaver] WriteModule is only supported when 'Save As Separate Files' mode is enabled!!!</color>");
+                return;
+            }
+
+            string profilePath = Path.Combine(filePath, profileId);
+            string fileExtention = this.fileName.Split('.')[^1];
+            string fileName = $"{moduleKey}.{fileExtention}";
+
+            WriteObjectImmediate(data, fileName, profilePath);
+        }
+
+        private void WriteObjectImmediate(object data, string fileName, string profilePath)
+        {
+            if (data == null)
+            {
+                Debug.Log("<color=red>[GameSaver] Cannot save null data!!!</color>");
+                return;
+            }
+
+            Directory.CreateDirectory(profilePath);
+
+            string fullPath = Path.Combine(profilePath, fileName);
+            string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
+            string tempPath = fullPath + TEMP_EXTENSION;
+
+            try
+            {
+                string dataToSave = JsonConvert.SerializeObject(data, Formatting.Indented, JsonUtilities.UnityJsonSettings);
+                if (useEncryption)
+                {
+                    string secret = AES.GetPassphrase();
+                    string encryptedData = AES.Encrypt(dataToSave, secret);
+                    dataToSave = encryptedData;
+                }
+
+                File.WriteAllText(tempPath, dataToSave);
 
                 if (File.Exists(fullPath))
                 {
@@ -316,7 +395,6 @@ namespace ThanhDV.GameSaver.Core
 
             return success;
         }
-
         #endregion
     }
 }

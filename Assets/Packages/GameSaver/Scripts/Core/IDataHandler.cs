@@ -9,8 +9,11 @@ namespace ThanhDV.GameSaver.Core
         Task<ISaveData> ReadModule(string profileId, string moduleKey, bool allowRestoreFromBackup = true);
         Task<Dictionary<string, SaveData>> ReadAllProfile();
 
-        Task Write(SaveData data, string profileId);
-        Task WriteModule(ISaveData data, string moduleKey, string profileId);
+        Task WriteAsync(SaveData data, string profileId);
+        Task WriteModuleAsync(ISaveData data, string moduleKey, string profileId);
+
+        void WriteImmediate(SaveData data, string profileId);
+        void WriteModuleImmediate(ISaveData data, string moduleKey, string profileId);
 
         void Delete(string profileId);
 
