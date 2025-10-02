@@ -14,6 +14,7 @@ namespace ThanhDV.GameSaver.Core
 {
     public class GameSaver : MonoBehaviour
     {
+#if !INJECTION_ENABLED
         #region Singleton
         private static GameSaver _instance;
         private static readonly object _lock = new();
@@ -31,7 +32,6 @@ namespace ThanhDV.GameSaver.Core
                         if (_instance == null)
                         {
                             _instance = new GameObject("GameSaver").AddComponent<GameSaver>();
-
                             Debug.Log($"<color=yellow>{_instance.GetType().Name} instance is null!!! Auto create new instance!!!</color>");
                         }
                         DontDestroyOnLoad(_instance);
@@ -63,6 +63,13 @@ namespace ThanhDV.GameSaver.Core
             Destroy(gameObject);
         }
         #endregion
+#else
+        private void Awake()
+        {
+            Initialize();
+            DontDestroyOnLoad(gameObject);
+        }
+#endif
 
         [UnderlineHeader("Config")]
         [SerializeField] private SaveSettings saveSettings;
@@ -156,6 +163,7 @@ namespace ThanhDV.GameSaver.Core
         #endregion
 
         #region Initialization
+
         private void Initialize()
         {
             initializationTCS = new TaskCompletionSource<bool>();

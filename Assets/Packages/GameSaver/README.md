@@ -198,6 +198,40 @@ GameSaver.Instance.DeleteData("Profile_Slot_1");
 - After `DeleteData()`, the system automatically switches to the most recently used profile or the default profile.
 - By default, data is loaded when `GameSaver` initializes and saved when the application quits (or is paused on Android/iOS).
 
+### 7. Dependency Injection (DI) Integration
+For projects using a Dependency Injection framework (like Reflex, VContainer, Zenject, etc.), you can make `GameSaver` DI-friendly by defining the `INJECTION_ENABLED` scripting symbol in your project settings.
+
+**How it works:**
+- When `INJECTION_ENABLED` is defined, the standard singleton (`GameSaver.Instance`) is disabled.
+- This allows you to register `GameSaver` with your DI container and inject it into other classes instead of accessing it globally.
+
+**Example (using a generic DI container):**
+```csharp
+// In your Reflex installer or composition root
+var gameSaverObject = new GameObject("GameSaver");
+var gameSaverInstance = gameSaverObject.AddComponent<GameSaver>();
+
+builder.AddSingleton(gameSaverInstance);
+
+// In your consumer class
+public class MyGameManager
+{
+    [Inject] private readonly GameSaver _gameSaver;
+
+    public MyGameManager(GameSaver gameSaver)
+    {
+        _gameSaver = gameSaver;
+    }
+
+    public void Save()
+    {
+        _gameSaver.SaveGameAsync();
+    }
+}
+```
+
+By defining `INJECTION_ENABLED`, you take responsibility for creating and managing the `GameSaver` instance's lifecycle through your DI container.
+
 ### 6. Others
 #### Wait until data is loaded
 ```csharp

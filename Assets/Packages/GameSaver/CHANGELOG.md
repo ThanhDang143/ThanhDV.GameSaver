@@ -1,6 +1,9 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2025-09-30
+- Make Dependence Injection friendly.
+
 ## [1.2.0] - 2025-09-30
 - Fix save logic (add SaveImmediate/SaveAsync)
 - Prevents consecutive rapid save calls from overlapping/overwriting each other

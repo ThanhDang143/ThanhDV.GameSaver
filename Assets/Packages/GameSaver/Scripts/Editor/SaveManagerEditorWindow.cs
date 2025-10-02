@@ -27,7 +27,7 @@ namespace ThanhDV.GameSaver
         private readonly Dictionary<string, bool> foldoutStates = new();
         private bool hasDataUnsaved = false;
 
-        [MenuItem("Tools/GameSaver/Save Manager")]
+        [MenuItem("Tools/ThanhDV/Game Saver/Save Manager", false, 1)]
         public static void ShowWindow()
         {
             SaveManagerEditorWindow window = GetWindow<SaveManagerEditorWindow>();
@@ -35,6 +35,9 @@ namespace ThanhDV.GameSaver
             window.minSize = new Vector2(400, 300);
             window.Show();
         }
+
+        [MenuItem("Tools/ThanhDV/---", true)]
+        private static bool Separator() => false;
 
         private async void OnEnable()
         {
