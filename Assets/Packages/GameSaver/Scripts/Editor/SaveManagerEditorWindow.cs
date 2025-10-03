@@ -12,7 +12,7 @@ using System.Linq;
 using UnityEngine.AddressableAssets;
 using Newtonsoft.Json.Linq;
 
-namespace ThanhDV.GameSaver
+namespace ThanhDV.GameSaver.Editor
 {
     public class SaveManagerEditorWindow : EditorWindow
     {
@@ -27,7 +27,7 @@ namespace ThanhDV.GameSaver
         private readonly Dictionary<string, bool> foldoutStates = new();
         private bool hasDataUnsaved = false;
 
-        [MenuItem("Tools/ThanhDV/Game Saver/Save Manager", false, 1)]
+        [MenuItem("Tools/ThanhDV/Game Saver/Save Manager", false, 2)]
         public static void ShowWindow()
         {
             SaveManagerEditorWindow window = GetWindow<SaveManagerEditorWindow>();

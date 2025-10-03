@@ -13,7 +13,7 @@ namespace ThanhDV.GameSaver.Editor
         private UnityEditor.Editor settingsEditor;
         private bool isLoadingSaveSettings = false;
 
-        [MenuItem("Tools/ThanhDV/Game Saver/Save Settings", false, 2)]
+        [MenuItem("Tools/ThanhDV/Game Saver/Save Settings", false, 3)]
         public static void ShowWindow()
         {
             SaveSettingsEditorWindow window = GetWindow<SaveSettingsEditorWindow>();

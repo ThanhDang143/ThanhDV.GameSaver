@@ -61,7 +61,7 @@ namespace ThanhDV.GameSaver.Editor
             return assetPath;
         }
 
-        private static string GetPackageVersion()
+        public static string GetPackageVersion()
         {
             string[] guids = AssetDatabase.FindAssets("t:Script PackageImporter");
             if (guids.Length == 0)
@@ -78,7 +78,7 @@ namespace ThanhDV.GameSaver.Editor
             return packageInfo.version;
         }
 
-        private static void MakeAddressable()
+        public static void MakeAddressable()
         {
             string assetName = $"{Constant.SAVE_SETTINGS_NAME}.asset";
             string assetPath = FindSaveSettingsPath();
