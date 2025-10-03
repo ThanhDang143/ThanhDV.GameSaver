@@ -93,27 +93,51 @@ namespace ThanhDV.GameSaver.Editor
             AddressableAssetSettings settings = AddressableAssetSettingsDefaultObject.Settings;
             if (settings == null)
             {
-                Debug.Log($"<color=red>[GameSaver] Addressable Asset Settings not found. Please initialize Addressables in your project (Window > Asset Management > Addressables > Groups, then click 'Create Addressables Settings')!!!</color>");
+                try
+                {
+                    AddressableAssetSettingsDefaultObject.GetSettings(true);
+                    settings = AddressableAssetSettingsDefaultObject.Settings;
+                }
+                catch
+                {
+                    Debug.Log($"<color=red>[GameSaver] Addressable Asset Settings not found. Please initialize Addressables in your project (Window > Asset Management > Addressables > Groups, then click 'Create Addressables Settings')!!!</color>");
+                    return;
+                }
+            }
+
+            if (settings == null)
+            {
+                Debug.Log($"<color=red>[GameSaver] Failed to initialize Addressable Asset Settings!!!</color>");
                 return;
             }
 
             AddressableAssetGroup group = settings.FindGroup("GameSaver");
             if (group == null)
             {
-                group = settings.CreateGroup("GameSaver", false, false, true, null, typeof(AddressableGroupSchemas.BundledAssetGroupSchema));
-                if (group == null)
+                try
                 {
-                    Debug.Log($"<color=red>[GameSaver] No Addressable Asset Group found or could be created. Cannot make asset addressable!!!</color>");
+                    group = settings.CreateGroup("GameSaver", false, false, true, null, typeof(AddressableGroupSchemas.BundledAssetGroupSchema));
+                    if (group == null)
+                    {
+                        Debug.Log($"<color=red>[GameSaver] Failed to create Addressable Asset Group 'GameSaver'!!!</color>");
+                        return;
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.Log($"<color=red>[GameSaver] Exception creating Addressable group: {ex.Message}. Please manually initialize Addressables first!!!</color>");
+                    return;
                 }
             }
-            else
-            {
-                if (group.GetSchema<AddressableGroupSchemas.BundledAssetGroupSchema>() == null)
-                {
-                    group.AddSchema<AddressableGroupSchemas.BundledAssetGroupSchema>();
-                    settings.SetDirty(AddressableAssetSettings.ModificationEvent.GroupSchemaAdded, group, true);
-                }
 
+            if (group.GetSchema<AddressableGroupSchemas.BundledAssetGroupSchema>() == null)
+            {
+                group.AddSchema<AddressableGroupSchemas.BundledAssetGroupSchema>();
+                settings.SetDirty(AddressableAssetSettings.ModificationEvent.GroupSchemaAdded, group, true);
+            }
+
+            try
+            {
                 AddressableAssetEntry entry = settings.CreateOrMoveEntry(guid, group, false, false);
                 if (entry != null)
                 {
@@ -125,6 +149,10 @@ namespace ThanhDV.GameSaver.Editor
                 {
                     Debug.Log($"<color=red>[GameSaver] Failed to create or move Addressable entry for {assetName} (GUID: {guid})!!!</color>");
                 }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.Log($"<color=red>[GameSaver] Exception creating Addressable entry: {ex.Message}!!!</color>");
             }
         }
     }
