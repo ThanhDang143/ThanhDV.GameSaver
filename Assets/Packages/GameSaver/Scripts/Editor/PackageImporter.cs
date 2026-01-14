@@ -11,6 +11,8 @@ namespace ThanhDV.GameSaver.Editor
     [InitializeOnLoad]
     public static class PackageImporter
     {
+        private const string DEFAULT_SAVE_SETTINGS_SO_PATH = Constant.DEFAULT_SAVE_SETTINGS_SO_FOLDER + "/" + Constant.SAVE_SETTINGS_NAME + ".asset";
+
         static PackageImporter()
         {
             string packageVersion = GetPackageVersion();
@@ -26,14 +28,17 @@ namespace ThanhDV.GameSaver.Editor
 
         private static string FindSaveSettingsPath()
         {
-            string[] guids = AssetDatabase.FindAssets($"{Constant.SAVE_SETTINGS_NAME} t:ScriptableObject");
-            foreach (var g in guids)
+            if (AssetDatabase.LoadAssetAtPath<SaveSettings>(DEFAULT_SAVE_SETTINGS_SO_PATH) != null)
+                return DEFAULT_SAVE_SETTINGS_SO_PATH;
+
+            string[] guids = AssetDatabase.FindAssets($"{Constant.SAVE_SETTINGS_NAME} t:{nameof(SaveSettings)}");
+            if (guids == null || guids.Length == 0) guids = AssetDatabase.FindAssets($"t:{nameof(SaveSettings)}");
+
+            foreach (string guid in guids)
             {
-                string p = AssetDatabase.GUIDToAssetPath(g);
-                if (p.EndsWith("/SO/SaveSettings.asset"))
-                {
-                    return p;
-                }
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetDatabase.LoadAssetAtPath<SaveSettings>(path) != null)
+                    return path;
             }
 
             return CreateSaveSettingsIfNotExist();
@@ -41,13 +46,9 @@ namespace ThanhDV.GameSaver.Editor
 
         private static string CreateSaveSettingsIfNotExist()
         {
-            const string rootFolder = "Assets/Plugins/GameSaver";
-            const string soFolder = rootFolder + "/SO";
-            string assetPath = $"{soFolder}/{Constant.SAVE_SETTINGS_NAME}.asset";
+            EnsureFolderPath(Constant.DEFAULT_SAVE_SETTINGS_SO_FOLDER);
 
-            if (!AssetDatabase.IsValidFolder("Assets/Plugins")) AssetDatabase.CreateFolder("Assets", "Plugins");
-            if (!AssetDatabase.IsValidFolder(rootFolder)) AssetDatabase.CreateFolder("Assets/Plugins", "GameSaver");
-            if (!AssetDatabase.IsValidFolder(soFolder)) AssetDatabase.CreateFolder(rootFolder, "SO");
+            string assetPath = $"{Constant.DEFAULT_SAVE_SETTINGS_SO_FOLDER}/{Constant.SAVE_SETTINGS_NAME}.asset";
 
             ScriptableObject existing = AssetDatabase.LoadAssetAtPath<ScriptableObject>(assetPath);
             if (existing != null) return assetPath;
@@ -59,6 +60,22 @@ namespace ThanhDV.GameSaver.Editor
 
             Debug.Log($"<color=yellow>[GameSaver] Auto-created SaveSettings at {assetPath}</color>");
             return assetPath;
+        }
+
+        private static void EnsureFolderPath(string folderPath)
+        {
+            if (string.IsNullOrEmpty(folderPath) || AssetDatabase.IsValidFolder(folderPath)) return;
+
+            string[] parts = folderPath.Split('/');
+            if (parts.Length == 0) return;
+
+            string current = parts[0];
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string next = $"{current}/{parts[i]}";
+                if (!AssetDatabase.IsValidFolder(next)) AssetDatabase.CreateFolder(current, parts[i]);
+                current = next;
+            }
         }
 
         public static string GetPackageVersion()

@@ -1,6 +1,6 @@
 {
     "name": "thanhdv.gamesaver",
-    "version": "1.3.2",
+    "version": "1.3.3",
     "displayName": "ThanhDV's GameSaver",
     "description": "Lightweight save system for Unity.",
     "unity": "2022.3",
@@ -13,7 +13,7 @@
     "author": {
         "name": "ThanhDV",
         "email": "vanthanh1998@gmail.com",
-        "url": "https://books.thanhdv.icu/"
+        "url": "https://knowledge.thanhdv.com/"
     },
     "dependencies": {
         "com.unity.addressables": "1.22.3",

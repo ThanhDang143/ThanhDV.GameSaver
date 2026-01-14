@@ -4,7 +4,7 @@ def verdaccioPackageUrl = ""
 
 pipeline {
     // Agent with Node.js & Git required
-    agent { label "thanhsserver" }
+    agent { label "verdaccio-publisher" }
 
     // Ensure Node.js tool is available (configure in Jenkins Global Tool Config)
     tools {
@@ -16,7 +16,7 @@ pipeline {
         PROJECT_PATH = "Assets/Packages/GameSaver"
 
         // Verdaccio registry URL
-        VERDACCIO_REGISTRY_URL = "https://upm.thanhdv.icu"
+        VERDACCIO_REGISTRY_URL = "https://upm.thanhdv.com"
         // Jenkins Credential ID for Verdaccio auth (e.g., Secret Text or User/Pass with token)
         VERDACCIO_CREDENTIAL_ID = "THANHDV_VERDACCIO_AUTH"
 
@@ -50,34 +50,34 @@ pipeline {
             }
         }
         
-        // stage("Validate Commit Message") {
-        //     steps {
-        //         dir(env.PROJECT_PATH) {
-        //             script {
-        //                 def isManualTrigger = false
-        //                 currentBuild.getBuildCauses().each{ cause -> 
-        //                     if (cause instanceof hudson.model.Cause$UserIdCause || cause.shortDescription.contains("Started by user ")) {
-        //                         isManualTrigger = true
-        //                     }
-        //                 }
+        stage("Validate Commit Message") {
+            steps {
+                dir(env.PROJECT_PATH) {
+                    script {
+                        def isManualTrigger = false
+                        currentBuild.getBuildCauses().each{ cause -> 
+                            if (cause instanceof hudson.model.Cause$UserIdCause || cause.shortDescription.contains("Started by user ")) {
+                                isManualTrigger = true
+                            }
+                        }
 
-        //                 if (isManualTrigger) {
-        //                     echo "Build triggered by User! Ignore Validate Commit Message."
-        //                 } else {
-        //                     def commitMessage = bat(script: 'git log -1 --pretty=%%B', returnStdout: true).trim()
-        //                     echo "Checking commit message: ${commitMessage}"
-        //                     if (!commitMessage.contains(RELEASE_KEYWORD)) {
-        //                         echo "Build condition not met! Aborting pipeline..."
-        //                         currentBuild.result = 'ABORTED'
-        //                         return
-        //                     }
-        //                 }
+                        if (isManualTrigger) {
+                            echo "Build triggered by User! Ignore Validate Commit Message."
+                        } else {
+                            def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                            echo "Checking commit message: ${commitMessage}"
+                            if (!commitMessage.contains(RELEASE_KEYWORD)) {
+                                echo "Build condition not met! Aborting pipeline..."
+                                currentBuild.result = 'ABORTED'
+                                return
+                            }
+                        }
 
-        //                 echo "Commit message is valid for release."
-        //             }
-        //         }
-        //     }
-        // }
+                        echo "Commit message is valid for release."
+                    }
+                }
+            }
+        }
 
         stage("Prepare") {
             when {
@@ -119,14 +119,14 @@ pipeline {
                             def registryHostPath = "//${registryAuthority}/"
 
                             // Configure .npmrc for Verdaccio registry & auth token
-                            bat "echo ${registryHostPath}:_auth=\"${encodedAuth}\" > .npmrc"
-                            bat "echo registry=${env.VERDACCIO_REGISTRY_URL} >> .npmrc"
+                            sh "echo ${registryHostPath}:_auth=\"${encodedAuth}\" > .npmrc"
+                            sh "echo registry=${env.VERDACCIO_REGISTRY_URL} >> .npmrc"
                             echo ".npmrc configured."
                         }
 
                         // Install dependencies (might run prepublish scripts)
                         // echo "Running npm install..."
-                        // bat "npm install"
+                        // sh "npm install"
                     }
                 }
             }
@@ -145,7 +145,7 @@ pipeline {
                         echo "Publishing package version ${packageVersionFromFile} to ${env.VERDACCIO_REGISTRY_URL}"
                         try {
                             // Publish using npm (reads package.json for name/version, uses .npmrc for auth/registry)
-                            bat "npm publish --registry ${env.VERDACCIO_REGISTRY_URL}"
+                            sh "npm publish --registry ${env.VERDACCIO_REGISTRY_URL}"
                             echo "Package version ${packageVersionFromFile} published successfully!"
                         } catch (err) {
                             echo "ERROR: Failed to publish package!"
@@ -170,13 +170,13 @@ pipeline {
         //                 withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: "GIT_USERNAME", passwordVariable: "GIT_ACCESS_TOKEN")]) {
 
         //                     // Configure Git user (may not be needed if just tagging)
-        //                     bat "git config user.email \"vanthanh1998@gmail.com\"" // EDIT Or use a specific user
-        //                     bat "git config user.name \"ThanhDVs Jenkins\""
+        //                     sh "git config user.email \"vanthanh1998@gmail.com\"" // EDIT Or use a specific user
+        //                     sh "git config user.name \"ThanhDVs Jenkins\""
 
         //                     // NO commit needed here as we didn"t change package.json version via npm version
 
         //                     // Create annotated tag using the version from package.json
-        //                     bat "git tag -a v${packageVersionFromFile} -m \"Release v${packageVersionFromFile}\"" // Use the read version
+        //                     sh "git tag -a v${packageVersionFromFile} -m \"Release v${packageVersionFromFile}\"" // Use the read version
 
         //                     // Push tag using HTTPS URL with embedded token
         //                     def repoUrl = scm.userRemoteConfigs[0].url
@@ -187,7 +187,7 @@ pipeline {
         //                     def pushUrl = repoUrlClean.replaceFirst("https://", "https://${GIT_USERNAME}:${GIT_ACCESS_TOKEN}@")
 
         //                     // Push only the tag
-        //                     bat "git push ${pushUrl} refs/tags/v${packageVersionFromFile}:refs/tags/v${packageVersionFromFile}"
+        //                     sh "git push ${pushUrl} refs/tags/v${packageVersionFromFile}:refs/tags/v${packageVersionFromFile}"
 
         //                     echo "Version tag v${packageVersionFromFile} pushed successfully."
         //                 }
@@ -206,7 +206,7 @@ pipeline {
             dir(env.PROJECT_PATH) {
                 script {
                     try {
-                        bat "del /F /Q .npmrc"
+                        sh "rm -f .npmrc"
                     } catch (err) {
                         echo "Could not delete .npmrc (maybe it doesn't exist): ${err.getMessage()}"
                     }
