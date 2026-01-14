@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.3.4] - 2026-01-14
+- Update PackageImporter
+- Remove Default SaveSettings
+
 ## [1.3.1] - 2025-10-03
 - Update initializer
 - Add manual initialize
