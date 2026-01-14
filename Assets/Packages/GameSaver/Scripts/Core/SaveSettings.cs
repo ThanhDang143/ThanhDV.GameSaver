@@ -4,7 +4,6 @@ using UnityEngine;
 
 namespace ThanhDV.GameSaver.Core
 {
-    [CreateAssetMenu(fileName = "SaveSettings", menuName = "GameSaver/SaveSettings", order = 0)]
     public class SaveSettings : ScriptableObject
     {
         [UnderlineHeader("Storage Settings")]

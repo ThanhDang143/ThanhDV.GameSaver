@@ -1,3 +1,4 @@
+using ThanhDV.GameSaver.Helper;
 using UnityEditor;
 
 namespace ThanhDV.GameSaver.Editor
@@ -8,7 +9,7 @@ namespace ThanhDV.GameSaver.Editor
         public static void Initialize()
         {
             string packageVersion = PackageImporter.GetPackageVersion();
-            string editorPrefsKey = $"ThanhDV.GameSaver.Version.{packageVersion}.Initialized";
+            string editorPrefsKey = $"{Constant.EDITOR_PREF_KEY_PREFIX}{packageVersion}";
 
             if (!EditorPrefs.HasKey(editorPrefsKey)) EditorPrefs.SetBool(editorPrefsKey, false);
 

@@ -80,7 +80,7 @@ namespace ThanhDV.GameSaver.Editor
         {
             if (saveSettings != null) return saveSettings;
 
-            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_NAME);
+            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_SO_NAME);
             saveSettings = await handle.Task;
 
             handle.Release();
@@ -118,7 +118,7 @@ namespace ThanhDV.GameSaver.Editor
         {
             const string rootFolder = "Assets/Plugins/GameSaver";
             const string soFolder = rootFolder + "/SO";
-            string assetPath = $"{soFolder}/{Constant.SAVE_SETTINGS_NAME}.asset";
+            string assetPath = $"{soFolder}/{Constant.SAVE_SETTINGS_SO_NAME}.asset";
 
             if (!AssetDatabase.IsValidFolder("Assets/Plugins")) AssetDatabase.CreateFolder("Assets", "Plugins");
             if (!AssetDatabase.IsValidFolder(rootFolder)) AssetDatabase.CreateFolder("Assets/Plugins", "GameSaver");
@@ -129,7 +129,7 @@ namespace ThanhDV.GameSaver.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            Debug.Log($"<color=green>[GameSaver] Created SaveSettings at {assetPath}</color>");
+            DebugLog.Success($"Created SaveSettings at {assetPath}");
             return assetPath;
         }
     }

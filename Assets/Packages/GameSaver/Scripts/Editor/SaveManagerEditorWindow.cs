@@ -1,5 +1,4 @@
 using ThanhDV.GameSaver.Core;
-using ThanhDV.GameSaver.Editor;
 using ThanhDV.GameSaver.Helper;
 using UnityEditor;
 using UnityEngine;
@@ -278,7 +277,7 @@ namespace ThanhDV.GameSaver.Editor
         {
             if (saveSettings != null) return saveSettings;
 
-            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_NAME);
+            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_SO_NAME);
             saveSettings = await handle.Task;
 
             handle.Release();
@@ -290,7 +289,7 @@ namespace ThanhDV.GameSaver.Editor
         {
             const string rootFolder = "Assets/Plugins/GameSaver";
             const string soFolder = rootFolder + "/SO";
-            string assetPath = $"{soFolder}/{Constant.SAVE_SETTINGS_NAME}.asset";
+            string assetPath = $"{soFolder}/{Constant.SAVE_SETTINGS_SO_NAME}.asset";
 
             if (!AssetDatabase.IsValidFolder("Assets/Plugins")) AssetDatabase.CreateFolder("Assets", "Plugins");
             if (!AssetDatabase.IsValidFolder(rootFolder)) AssetDatabase.CreateFolder("Assets/Plugins", "GameSaver");
@@ -301,7 +300,7 @@ namespace ThanhDV.GameSaver.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            Debug.Log($"<color=green>[GameSaver] Created SaveSettings at {assetPath}</color>");
+            DebugLog.Success($"Created SaveSettings at {assetPath}");
             return assetPath;
         }
 
@@ -371,7 +370,7 @@ namespace ThanhDV.GameSaver.Editor
             }
             catch (Exception e)
             {
-                Debug.Log($"<color=red>[SaveManager] Failed to read or deserialize data for profile {profileId}!!!</color>\n{e}");
+                DebugLog.Error($"Failed to read or deserialize data for profile {profileId}!!!\n{e}");
                 return null;
             }
         }
@@ -390,7 +389,7 @@ namespace ThanhDV.GameSaver.Editor
                 catch (Exception e)
                 {
                     EditorUtility.DisplayDialog("Save Failed", $"Failed to save file for profile '{profileId}'. See Console for details.", "OK");
-                    Debug.Log($"<color=red>[SaveManager] Failed to save to profile {profileId}!!!</color>\n{e}");
+                    DebugLog.Error($"Failed to save to profile {profileId}!!!\n{e}");
                 }
                 finally
                 {
@@ -426,7 +425,7 @@ namespace ThanhDV.GameSaver.Editor
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             var saveData = new SaveData();
-            var jObject = Newtonsoft.Json.Linq.JObject.Load(reader);
+            var jObject = JObject.Load(reader);
 
             var dataModules = jObject["DataModules"];
             if (dataModules != null)

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ThanhDV.GameSaver.Helper;
+using ThanhDV.GameSaver;
 using System.Threading.Tasks;
 using System.Collections;
 using UnityEngine.AddressableAssets;
@@ -32,7 +33,7 @@ namespace ThanhDV.GameSaver.Core
                         if (_instance == null)
                         {
                             _instance = new GameObject("GameSaver").AddComponent<GameSaver>();
-                            Debug.Log($"<color=yellow>{_instance.GetType().Name} instance is null!!! Auto create new instance!!!</color>");
+                            DebugLog.Warning($"{_instance.GetType().Name} instance is null!!! Auto create new instance!!!");
                         }
                         DontDestroyOnLoad(_instance);
                     }
@@ -183,7 +184,7 @@ namespace ThanhDV.GameSaver.Core
 
             StartAutoSave();
 
-            Debug.Log("<color=green>[GameSaver] Initialized done!!!</color>");
+            DebugLog.Success("Initialized done!!!");
 
             initializationTCS.TrySetResult(true);
         }
@@ -205,12 +206,12 @@ namespace ThanhDV.GameSaver.Core
         {
             if (saveSettings != null) return true;
 
-            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_NAME);
+            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_SO_NAME);
             saveSettings = await handle.Task;
 
             if (saveSettings == null)
             {
-                Debug.LogWarning($"<color=red>[GameSaver] Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_NAME}' asset exists and is configured in Addressables!!!</color>");
+                DebugLog.Error($"Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_SO_NAME}' asset exists and is configured in Addressables!!!");
                 saveSettings = ScriptableObject.CreateInstance<SaveSettings>();
             }
             else
@@ -378,7 +379,7 @@ namespace ThanhDV.GameSaver.Core
             }
             catch (Exception e)
             {
-                Debug.Log($"<color=red>[GameSaver] Save failed for profile {curProfileId}!!!</color>\n{e}");
+                DebugLog.Error($"Save failed for profile {curProfileId}!!!\n{e}");
                 success = false;
             }
             finally
@@ -399,7 +400,7 @@ namespace ThanhDV.GameSaver.Core
             else
                 await dataHandler.WriteAsync(saveData, curProfileId);
 
-            Debug.Log("<color=green>[GameSaver] SaveAIO called!!!</color>");
+            DebugLog.Success("SaveAIO called!!!");
         }
 
         private async Task SaveAllModules(SaveMode mode)
@@ -409,7 +410,7 @@ namespace ThanhDV.GameSaver.Core
                 string moduleKey = savable.SaveType.Name;
                 savable.SaveData(saveData);
                 await SaveModuleInternal(moduleKey, mode);
-                Debug.Log($"<color=green>[GameSaver] Save {moduleKey} called!!!</color>");
+                DebugLog.Success($"Save {moduleKey} called!!!");
             }
         }
 
@@ -418,7 +419,7 @@ namespace ThanhDV.GameSaver.Core
             saveData ??= new();
             if (!saveData.TryGetData(moduleKey, out ISaveData data) || data == null)
             {
-                Debug.Log($"<color=red>[GameSaver] SaveModule({moduleKey}) called with null data!!!</color>");
+                DebugLog.Error($"SaveModule({moduleKey}) called with null data!!!");
                 return Task.CompletedTask;
             }
 
@@ -447,7 +448,7 @@ namespace ThanhDV.GameSaver.Core
                 yield return new WaitForSecondsRealtime(saveSettings.AutoSaveTime);
                 Task saveTask = SaveGameAsync();
                 yield return new WaitUntil(() => saveTask.IsCompleted);
-                Debug.Log("<color=green>[GameSaver] AutoSave called!!!</color>");
+                DebugLog.Success("AutoSave called!!!");
             }
         }
         #endregion
@@ -485,7 +486,7 @@ namespace ThanhDV.GameSaver.Core
                 savableLoaded.OnLoadCompleted(saveData);
             }
 
-            Debug.Log($"<color=green>[GameSaver] Multi-file data loaded for profile: {curProfileId}</color>");
+            DebugLog.Success($"Multi-file data loaded for profile: {curProfileId}");
 
             async Task LoadAndApplyData(ISavable savable)
             {
@@ -513,7 +514,7 @@ namespace ThanhDV.GameSaver.Core
                 savableLoaded.OnLoadCompleted(saveData);
             }
 
-            Debug.Log($"<color=green>[GameSaver] Data loaded (Profile: {curProfileId})</color>");
+            DebugLog.Success($"Data loaded (Profile: {curProfileId})");
         }
 
         private async Task<ISaveData> LoadModule(string moduleKey)
@@ -563,7 +564,7 @@ namespace ThanhDV.GameSaver.Core
             string id = string.IsNullOrEmpty(profileId) ? curProfileId : profileId;
             SetProfileID(id);
 
-            Debug.Log($"<color=green>[GameSaver] Created new game with profile: {id}!!!</color>");
+            DebugLog.Success($"Created new game with profile: {id}!!!");
         }
 
         /// <summary>
@@ -622,12 +623,12 @@ namespace ThanhDV.GameSaver.Core
 
             if (saveSettings.CreateProfileIfNull)
             {
-                Debug.Log($"<color=yellow>[GameSaver] No data. Created new data with profile: {curProfileId}!!!</color>");
+                DebugLog.Warning($"No data. Created new data with profile: {curProfileId}!!!");
                 InternalNewGame(curProfileId);
             }
             else
             {
-                Debug.Log($"<color=yellow>[GameSaver] No data. Run NewGame() before LoadGame()/SaveGame()!!!</color>");
+                DebugLog.Warning($"No data. Run NewGame() before LoadGame()/SaveGame()!!!");
             }
 
             return saveSettings.CreateProfileIfNull;
