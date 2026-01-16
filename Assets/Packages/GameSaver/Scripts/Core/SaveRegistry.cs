@@ -19,7 +19,12 @@ namespace ThanhDV.GameSaver.Core
 
         private static void FlushPending()
         {
-            foreach (ISavable savable in savablesPending)
+            if (savablesPending.Count == 0) return;
+
+            List<ISavable> pending = new(savablesPending);
+            savablesPending.Clear();
+
+            foreach (ISavable savable in pending)
             {
                 register?.Invoke(savable);
             }

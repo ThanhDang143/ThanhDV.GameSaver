@@ -10,6 +10,7 @@ using System.Linq;
 using ThanhDV.GameSaver.CustomAttribute;
 using System;
 using System.Threading;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -74,6 +75,9 @@ namespace ThanhDV.GameSaver.Core
 
         [UnderlineHeader("Config")]
         [SerializeField] private SaveSettings saveSettings;
+
+        private AsyncOperationHandle<SaveSettings> _saveSettingsHandle;
+        private bool _hasSaveSettingsHandle;
 
         private string curProfileId;
         private SaveData saveData = new();
@@ -173,7 +177,7 @@ namespace ThanhDV.GameSaver.Core
 
         private async Task InitializeAsync()
         {
-            bool loadSettingsSuccess = await TryLoadSettings();
+            await TryLoadSettings();
 
             InitializeDataHandler();
             InitializeProfile();
@@ -202,24 +206,42 @@ namespace ThanhDV.GameSaver.Core
             curProfileId = string.IsNullOrEmpty(mostRecentProfile) ? Constant.DEFAULT_PROFILE_ID : mostRecentProfile;
         }
 
-        private async Task<bool> TryLoadSettings()
+        private async Task TryLoadSettings()
         {
-            if (saveSettings != null) return true;
-
-            var handle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_SO_NAME);
-            saveSettings = await handle.Task;
-
-            if (saveSettings == null)
+            if (saveSettings != null) return;
+            try
             {
-                DebugLog.Error($"Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_SO_NAME}' asset exists and is configured in Addressables!!!");
-                saveSettings = ScriptableObject.CreateInstance<SaveSettings>();
-            }
-            else
-            {
-                handle.Release();
-            }
+                _saveSettingsHandle = Addressables.LoadAssetAsync<SaveSettings>(Constant.SAVE_SETTINGS_SO_NAME);
+                _hasSaveSettingsHandle = true;
+                saveSettings = await _saveSettingsHandle.Task;
 
-            return true;
+                if (saveSettings == null)
+                {
+                    DebugLog.Error($"Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_SO_NAME}' asset exists and is configured in Addressables!!!");
+                    saveSettings = ScriptableObject.CreateInstance<SaveSettings>();
+
+                    if (_saveSettingsHandle.IsValid())
+                        Addressables.Release(_saveSettingsHandle);
+                    _hasSaveSettingsHandle = false;
+                }
+            }
+            catch (Exception e)
+            {
+                DebugLog.Error($"Could not load SaveSettings from Addressables. A default SaveSettings object will be created. Please ensure a '{Constant.SAVE_SETTINGS_SO_NAME}' asset exists and is configured in Addressables!!!\n{e}");
+                saveSettings = saveSettings != null ? saveSettings : ScriptableObject.CreateInstance<SaveSettings>();
+
+                if (_hasSaveSettingsHandle && _saveSettingsHandle.IsValid()) Addressables.Release(_saveSettingsHandle);
+                _hasSaveSettingsHandle = false;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_hasSaveSettingsHandle && _saveSettingsHandle.IsValid())
+            {
+                Addressables.Release(_saveSettingsHandle);
+                _hasSaveSettingsHandle = false;
+            }
         }
 
         private async void Register(ISavable savable)

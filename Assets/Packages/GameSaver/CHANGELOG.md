@@ -1,6 +1,9 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.3.5] - 2026-01-16
+- Fix `TryLoadSettings()`
+
 ## [1.3.4] - 2026-01-14
 - Update PackageImporter
 - Remove Default SaveSettings
