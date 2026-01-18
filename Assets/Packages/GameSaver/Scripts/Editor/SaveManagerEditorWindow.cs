@@ -35,9 +35,6 @@ namespace ThanhDV.GameSaver.Editor
             window.Show();
         }
 
-        [MenuItem("Tools/ThanhDV/---", true)]
-        private static bool Separator() => false;
-
         private async void OnEnable()
         {
             isLoadingSaveSettings = false;
