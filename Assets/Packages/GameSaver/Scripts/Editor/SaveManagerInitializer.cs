@@ -5,7 +5,7 @@ namespace ThanhDV.GameSaver.Editor
 {
     public class SaveManagerInitializer : EditorWindow
     {
-        [MenuItem("Tools/ThanhDV/Game Saver/Initialize", false, 1)]
+        [MenuItem("Tools/ThanhDV/Game Saver/Initialize", false)]
         public static void Initialize()
         {
             string packageVersion = PackageImporter.GetPackageVersion();
