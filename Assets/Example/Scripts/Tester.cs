@@ -20,7 +20,6 @@ public class Tester : MonoBehaviour, ISavable
 
     private void Awake()
     {
-        GameSaver.WakeUp();
         Tester1.Initialize();
     }
 
@@ -50,7 +49,6 @@ public class Tester : MonoBehaviour, ISavable
 
         if (Input.GetKeyDown(KeyCode.C))
         {
-            GameSaver.WakeUp();
         }
 
         if (Input.GetKeyDown(KeyCode.D))

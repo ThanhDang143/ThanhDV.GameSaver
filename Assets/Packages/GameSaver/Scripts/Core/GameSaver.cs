@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ThanhDV.GameSaver.Helper;
-using ThanhDV.GameSaver;
 using System.Threading.Tasks;
 using System.Collections;
 using UnityEngine.AddressableAssets;
@@ -45,18 +44,11 @@ namespace ThanhDV.GameSaver.Core
 
         public static bool IsExist => _instance != null;
 
-        public static void WakeUp()
-        {
-            if (IsExist) return;
-
-            var saver = Instance;
-        }
-
         private void Awake()
         {
             if (_instance == null)
             {
-                _instance = this as GameSaver;
+                _instance = this;
                 Initialize();
                 DontDestroyOnLoad(_instance);
                 return;
@@ -88,7 +80,6 @@ namespace ThanhDV.GameSaver.Core
         #region Events
 
         private TaskCompletionSource<bool> initializationTCS;
-        public Task WhenInitialized => initializationTCS?.Task ?? Task.CompletedTask;
 
         public static event Action<LoadStartArgs> OnLoadDataStarted;
         public static event Action<LoadCompleteArgs> OnLoadDataCompleted;
@@ -169,28 +160,54 @@ namespace ThanhDV.GameSaver.Core
 
         #region Initialization
 
+        /// <summary>
+        /// Wait until the save system has finished initializing.
+        /// Must be awaited before any Save/Load operations.
+        /// </summary>
+        public Task WaitForInitialization()
+        {
+            EnsureInitialized();
+            return initializationTCS.Task;
+
+            void EnsureInitialized()
+            {
+                if (initializationTCS != null) return;
+                Initialize();
+            }
+        }
+
         private void Initialize()
         {
-            initializationTCS = new TaskCompletionSource<bool>();
+            if (initializationTCS != null) return;
+
+            initializationTCS = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _ = InitializeAsync();
         }
 
         private async Task InitializeAsync()
         {
-            await TryLoadSettings();
+            try
+            {
+                await TryLoadSettings();
 
-            InitializeDataHandler();
-            InitializeProfile();
+                InitializeDataHandler();
+                InitializeProfile();
 
-            await InternalLoadGame();
+                await InternalLoadGame();
 
-            SaveRegistry.Bind(Register, Unregister);
+                SaveRegistry.Bind(Register, Unregister);
 
-            StartAutoSave();
+                StartAutoSave();
 
-            DebugLog.Success("Initialized done!!!");
+                DebugLog.Success("Initialized done!!!");
 
-            initializationTCS.TrySetResult(true);
+                initializationTCS.TrySetResult(true);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Error($"Initialization failed!!!\n{e}");
+                initializationTCS.TrySetException(e);
+            }
         }
 
         private void InitializeDataHandler()
@@ -288,7 +305,7 @@ namespace ThanhDV.GameSaver.Core
         #region NewGame
         public async Task NewGame(string profileId = null)
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             InternalNewGame(profileId);
         }
 
@@ -312,13 +329,13 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task SaveGameAsync()
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             await RequestCoalescedSave(SaveMode.Async);
         }
 
         public async Task SaveGameImmediate()
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             await RequestCoalescedSave(SaveMode.Immediate);
         }
 
@@ -479,14 +496,14 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task<Dictionary<string, SaveData>> LoadAllProfile()
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             Dictionary<string, SaveData> gameDatas = await dataHandler.ReadAllProfile();
             return gameDatas;
         }
 
         public async Task LoadGame()
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             await InternalLoadGame();
         }
 
@@ -617,7 +634,7 @@ namespace ThanhDV.GameSaver.Core
 
         public async Task DeleteData(string profileId)
         {
-            await WhenInitialized;
+            await WaitForInitialization();
             dataHandler.Delete(profileId);
             InitializeProfile();
             await LoadGame();

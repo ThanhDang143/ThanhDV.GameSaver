@@ -1,6 +1,9 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.3.8] - 2026-01-16
+- Improve `WaitForInitializeDone()` workflow to guarantee GameSaver is fully initialized before any Save/Load operations
+
 ## [1.3.5] - 2026-01-16
 - Fix `TryLoadSettings()`
 

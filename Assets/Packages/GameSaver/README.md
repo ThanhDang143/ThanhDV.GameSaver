@@ -8,7 +8,7 @@ A lightweight save system for Unity featuring:
 - Safe backup and recovery mechanisms.
 - In-editor data viewing and editing.
 - Prevents consecutive rapid save calls from overlapping/overwriting each other
-
+- Dependency Injection friendly.
 ---
 
 ## Installation
@@ -24,8 +24,8 @@ https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/Game
 ### Scoped Registry
 
 1. In Unity, open **Project Settings** → **Package Manager** → **Add New Scoped Registry**
-- ``Name`` ThanhDVs
-- ``URL`` https://upm.thanhdv.icu
+- ``Name`` ThanhDV
+- ``URL`` https://upm.thanhdv.com
 - ``Scope(s)`` thanhdv
 
 2. In Unity, open **Window** → **Package Manager**.
@@ -166,8 +166,8 @@ Use the `GameSaver.Instance` singleton to manage save/load operations.
 
 ```csharp
 // Initialize GameSaver. This happens automatically if you have prefab GameSaver in scene.
-// You can call this explicitly in a startup script to ensure it's ready.
-GameSaver.WakeUp();
+// IMPORTANT: Wait for GameSaver to finish initializing before calling any Save/Load/NewGame APIs.
+await GameSaver.Instance.WaitForInitializeDone();
 
 // Create a new game.
 GameSaver.Instance.NewGame(); // Uses the current or default profile ID.
@@ -269,7 +269,6 @@ GameSaver.Instance.OnSaveDataCompleted -= DoSomething; // Unsubscribe
 
 ## Other Information
 ### Encryption
-
 - Uses AES-GCM if available, with a fallback to AES-CBC + HMAC-SHA256 for broader compatibility.
 - Employs a stable passphrase that can be optionally bound to the device for added security.
 - Encryption can be disabled in the `SaveSettings` for easier debugging.
