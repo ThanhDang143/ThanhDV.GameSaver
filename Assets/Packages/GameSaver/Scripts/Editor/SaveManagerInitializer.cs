@@ -8,14 +8,14 @@ namespace ThanhDV.GameSaver.Editor
         [MenuItem("Tools/ThanhDV/Game Saver/Initialize", false)]
         public static void Initialize()
         {
-            string packageVersion = PackageImporter.GetPackageVersion();
-            string editorPrefsKey = $"{Constant.EDITOR_PREF_KEY_PREFIX}{packageVersion}";
-
-            if (!EditorPrefs.HasKey(editorPrefsKey)) EditorPrefs.SetBool(editorPrefsKey, false);
+            if (PackageImporter.IsInitializedCorrectly())
+            {
+                SessionState.SetBool(Constant.SESSION_KEY_CHECKED, true);
+                return;
+            }
 
             PackageImporter.MakeAddressable();
-            EditorPrefs.SetBool(editorPrefsKey, true);
+            SessionState.SetBool(Constant.SESSION_KEY_CHECKED, PackageImporter.IsInitializedCorrectly());
         }
-
     }
 }

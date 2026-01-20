@@ -14,6 +14,6 @@ namespace ThanhDV.GameSaver.Helper
         public const string SAVE_SETTINGS_SO_NAME = "SaveSettings";
         public const string SAVE_SETTINGS_SO_EXTENSION = ".asset";
 
-        public const string EDITOR_PREF_KEY_PREFIX = "ThanhDV.GameSaver.Version.Initialized.";
+        public const string SESSION_KEY_CHECKED = "ThanhDV.AudioManager.FMOD.CheckedInSession";
     }
 }

@@ -15,17 +15,37 @@ namespace ThanhDV.GameSaver.Editor
 
         static PackageImporter()
         {
-            string packageVersion = GetPackageVersion();
-            string editorPrefsKey = $"{Constant.EDITOR_PREF_KEY_PREFIX}{packageVersion}";
+            if (SessionState.GetBool(Constant.SESSION_KEY_CHECKED, false)) return;
 
-            if (!EditorPrefs.HasKey(editorPrefsKey)) EditorPrefs.SetBool(editorPrefsKey, false);
-            if (!EditorPrefs.GetBool(editorPrefsKey, false))
+            if (IsInitializedCorrectly())
             {
-                MakeAddressable();
-                EditorPrefs.SetBool(editorPrefsKey, true);
+                SessionState.SetBool(Constant.SESSION_KEY_CHECKED, true);
+                return;
             }
+
+            MakeAddressable();
+            SessionState.SetBool(Constant.SESSION_KEY_CHECKED, IsInitializedCorrectly());
         }
 
+        public static bool IsInitializedCorrectly()
+        {
+            string path = FindSaveSettingsPath();
+            string guid = AssetDatabase.AssetPathToGUID(path);
+            if (string.IsNullOrEmpty(guid)) return false;
+
+            AddressableAssetSettings settings = AddressableAssetSettingsDefaultObject.Settings;
+            if (settings == null) return false;
+
+            AddressableAssetGroup group = settings.FindGroup(Constant.ADDRESSABLE_GROUP);
+            if (group == null) return false;
+
+            AddressableAssetEntry entry = settings.FindAssetEntry(guid);
+            if (entry == null) return false;
+
+            if (entry.parentGroup.Name != Constant.ADDRESSABLE_GROUP) return false;
+
+            return true;
+        }
         private static string FindSaveSettingsPath()
         {
             if (AssetDatabase.LoadAssetAtPath<SaveSettings>(DEFAULT_SAVE_SETTINGS_SO_PATH) != null)
