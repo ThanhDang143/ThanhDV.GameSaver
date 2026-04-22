@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    actor Player as Game / Triggers
+    participant Savable as ISavable Objects
+    participant SM as SaveManager (Core)
+    participant Ser as ISerializer
+    participant Enc as IEncryptionProvider
+    participant Storage as IStorageProvider
+
+    Player->>SM: Call SaveGameAsync()
+    
+    rect rgba(0, 150, 255, 0.1)
+        Note over SM, Savable: 1. Data Collection (Memory)
+        SM->>Savable: Request data (Call SaveData(data))
+        Savable-->>SM: Update state into SaveData object
+    end
+
+    rect rgba(255, 165, 0, 0.1)
+        Note over SM, Enc: 2. Data Processing (Serialization)
+        SM->>Ser: Serialize(SaveData)
+        Ser-->>SM: Return JSON string (Raw String)
+        
+        opt If UseEncryption = true
+            SM->>Enc: Encrypt(Raw String, SecretKey)
+            Enc-->>SM: Return encrypted string (Cipher String)
+        end
+    end
+
+    rect rgba(0, 200, 100, 0.1)
+        Note over SM, Storage: 3. Write to Disk (I/O)
+        SM->>Storage: WriteAsync(ProfileID, Final String)
+        Note right of Storage: Write to .tmp file<br/>Create .bak backup<br/>Rename to .tdv
+        Storage-->>SM: Confirm successful write
+    end
+    
+    SM-->>Player: Fire OnSaveDataCompleted Event

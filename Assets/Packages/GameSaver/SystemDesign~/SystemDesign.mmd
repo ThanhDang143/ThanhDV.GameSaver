@@ -1,0 +1,132 @@
+---
+config:
+  theme: dark
+id: a2b2e2a4-97a9-411c-934f-6bb96bb3fbb2
+---
+classDiagram
+    %% --- LỚP LÕI (CORE) ---
+    namespace Core {
+        class ISavable {
+            <<interface>>
+            +Type SaveType
+            +SaveData(SaveData data)
+            +LoadData(SaveData data)
+        }
+        
+        class ISerializer {
+            <<interface>>
+            +Serialize~T~(T obj) string
+            +Deserialize~T~(string data) T
+        }
+
+        class IStorageProvider {
+            <<interface>>
+            +WriteAsync(string profileId, string fileName, string data) Task
+            +WriteImmediate(string profileId, string fileName, string data) void
+            +RestoreBackup(string profileId, string fileName) void
+            +ReadAsync(string profileId, string fileName) Task~string~
+            +ReadBackupAsync(string profileId, string fileName) Task~string~
+            +DeleteProfile(string profileId) void
+            +Exists(string profileId, string fileName) bool
+            +GetAllProfileIds() IEnumerable~string~
+            +GetMostRecentProfileId() string
+        }
+
+        class IEncryptionProvider {
+            <<interface>>
+            +Encrypt(string plainText, string secretKey) string
+            +Decrypt(string cipherText, string secretKey) string
+        }
+
+        class SaveManager {
+            -IStorageProvider _storage
+            -ISerializer _serializer
+            -IEncryptionProvider _encryption
+            -SaveSettings _settings
+            -HashSet~ISavable~ _savables
+            +Register(ISavable savable)
+            +Unregister(ISavable savable)
+            +SaveGameAsync() Task
+            +SaveGameImmediate() void
+            +LoadGameAsync() Task
+        }
+        
+        class SaveSettings {
+            <<ScriptableObject/POCO>>
+            +bool UseEncryption
+            +bool SaveAsSeparateFiles
+            +string FileExtension
+            +string SecretKey
+        }
+        
+        class SaveData {
+            +Dictionary~string, ISaveData~ DataModules
+            +TryGetData()
+            +TryAddData()
+        }
+    }
+
+    %% --- LỚP HẠ TẦNG (INFRASTRUCTURE) ---
+    namespace Infrastructure {
+        class NewtonsoftJsonSerializer {
+            -JsonSerializerSettings _settings
+            +Serialize~T~(T obj) string
+            +Deserialize~T~(string data) T
+        }
+
+        class LocalStorageProvider {
+            -string _basePath
+            +WriteAsync(string profileId, string fileName, string data) Task
+            +WriteImmediate(string profileId, string fileName, string data) void
+            -WriteToFileAsync(string fullPath, string data) Task
+            -WriteToFileImmediate(string fullPath, string data) void
+            -SafeReplace(string originalPath, string tempPath, string backupPath) void
+            +RestoreBackup(string profileId, string fileName) void
+            +ReadAsync(string profileId, string fileName) Task~string~
+            +ReadBackupAsync(string profileId, string fileName) Task~string~
+            +DeleteProfile(string profileId) void
+            +GetAllProfileIds() IEnumerable~string~
+            +GetMostRecentProfileId() string
+            +Exists(string profileId, string fileName) bool
+            -GetFullPath(string profileId, string fileName) string
+            -PrepareDictionary(string fullPath) void
+        }
+
+        class AesEncryptionProvider {
+            +Encrypt(string plainText, string secretKey) string
+            +Decrypt(string cipherText, string secretKey) string
+        }
+    }
+
+    %% --- LỚP TRÌNH DIỄN / UNITY INTEGRATION ---
+    graph LR
+    namespace UnityIntegration {
+        class GameSaverBootstrapper {
+            <<MonoBehaviour>>
+            -SaveSettings _settingsAsset
+            +Awake()
+            +OnApplicationQuit()
+        }
+        
+        class AutoSaveRunner {
+            <<MonoBehaviour>>
+            -SaveManager _saveManager
+            +StartAutoSave()
+        }
+    }
+
+    %% QUAN HỆ (RELATIONSHIPS)
+    SaveManager ..> IStorageProvider : Depends on
+    SaveManager ..> ISerializer : Depends on
+    SaveManager ..> IEncryptionProvider : Depends on
+    SaveManager ..> SaveSettings : Depends on
+    SaveManager "1" *-- "*" ISavable : Manages
+    SaveManager --> SaveData : Manipulates
+    ISavable ..> SaveData : Reads/Writes
+
+    NewtonsoftJsonSerializer ..|> ISerializer : Implements
+    LocalStorageProvider ..|> IStorageProvider : Implements
+    AesEncryptionProvider ..|> IEncryptionProvider : Implements
+
+    GameSaverBootstrapper ..> SaveManager : Configures & Instantiates
+    AutoSaveRunner ..> SaveManager : Triggers Save

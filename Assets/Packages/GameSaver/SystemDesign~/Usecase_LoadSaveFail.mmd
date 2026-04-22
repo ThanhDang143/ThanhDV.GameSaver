@@ -1,0 +1,53 @@
+graph TD
+    %% Color Definitions
+    classDef startEnd fill:#d4edda,stroke:#28a745,stroke-width:2px,color:#155724;
+    classDef action fill:#cce5ff,stroke:#007bff,stroke-width:2px,color:#004085;
+    classDef decision fill:#fff3cd,stroke:#ffc107,stroke-width:2px,color:#856404;
+    classDef error fill:#f8d7da,stroke:#dc3545,stroke-width:2px,color:#721c24;
+
+    %% Nodes
+    Start([Initialize Load Sequence])
+    LoadMain[Read & Decrypt Primary Save]
+    CheckMain{Is Primary<br/>Save Valid?}
+    
+    PromptBackup{PROMPT UI:<br/>Primary save corrupted.<br/>Load Backup instead?}
+    Abort([Abort / Return to Menu])
+    
+    LoadBackup[Read & Decrypt Backup Save]
+    CheckBackup{Is Backup<br/>Save Valid?}
+    
+    NotifyFail[NOTIFY UI:<br/>Backup save also corrupted!]
+    ActionFail([Prompt to select different Profile<br/>or Create New])
+    
+    PromptOverwrite{PROMPT UI:<br/>Overwrite corrupted<br/>primary save?}
+    
+    Overwrite[Storage.RestoreBackup<br/>Overwrite primary save]
+    
+    Success([Load Successful<br/>Enter Game])
+
+    %% Transitions
+    Start --> LoadMain
+    LoadMain --> CheckMain
+    
+    CheckMain -- "Yes (Valid)" --> Success
+    CheckMain -- "No (Corrupted)" --> PromptBackup
+    
+    PromptBackup -- "No" --> Abort
+    PromptBackup -- "Yes" --> LoadBackup
+    
+    LoadBackup --> CheckBackup
+    
+    CheckBackup -- "No (Corrupted)" --> NotifyFail
+    NotifyFail --> ActionFail
+    
+    CheckBackup -- "Yes (Valid)" --> PromptOverwrite
+    
+    PromptOverwrite -- "Yes" --> Overwrite
+    Overwrite --> Success
+    
+    PromptOverwrite -- "No" --> Success
+
+    class Start,Abort,ActionFail,Success startEnd;
+    class LoadMain,LoadBackup,Overwrite action;
+    class CheckMain,CheckBackup,PromptBackup,PromptOverwrite decision;
+    class NotifyFail error;

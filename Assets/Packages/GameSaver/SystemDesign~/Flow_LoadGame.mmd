@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    actor Player as Game / Triggers
+    participant Storage as IStorageProvider
+    participant Enc as IEncryptionProvider
+    participant Ser as ISerializer
+    participant SM as SaveManager (Core)
+    participant Savable as ISavable Objects
+
+    Player->>SM: Call LoadGameAsync(ProfileID)
+
+    rect rgba(0, 200, 100, 0.1)
+        Note over SM, Storage: 1. Read from Disk (I/O)
+        SM->>Storage: ReadAsync(ProfileID)
+        Note right of Storage: Read .tdv file<br/>If failed, try .bak
+        Storage-->>SM: Return file content (String)
+    end
+
+    rect rgba(255, 165, 0, 0.1)
+        Note over SM, Enc: 2. Data Restoration (Processing)
+        opt If UseEncryption = true
+            SM->>Enc: Decrypt(File String, SecretKey)
+            Enc-->>SM: Return decrypted JSON (Raw String)
+        end
+        
+        SM->>Ser: Deserialize<SaveData>(Raw String)
+        Ser-->>SM: Return SaveData object in RAM
+    end
+
+    rect rgba(0, 150, 255, 0.1)
+        Note over SM, Savable: 3. Data Distribution (Memory)
+        SM->>Savable: Call LoadData(SaveData)
+        Savable-->>SM: Extract corresponding data & update state
+    end
+
+    SM-->>Player: Fire OnLoadDataCompleted Event
