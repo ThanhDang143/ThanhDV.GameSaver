@@ -34,8 +34,8 @@ classDiagram
 
         class IEncryptionProvider {
             <<interface>>
-            +Encrypt(string plainText, string secretKey) string
-            +Decrypt(string cipherText, string secretKey) string
+            +Encrypt(string plainText) string
+            +Decrypt(string cipherText) string
         }
 
         class SaveManager {
@@ -68,7 +68,7 @@ classDiagram
 
     %% --- LỚP HẠ TẦNG (INFRASTRUCTURE) ---
     namespace Infrastructure {
-        class NewtonsoftJsonSerializer {
+        class JsonSerializer {
             -JsonSerializerSettings _settings
             +Serialize~T~(T obj) string
             +Deserialize~T~(string data) T
@@ -76,6 +76,7 @@ classDiagram
 
         class LocalStorageProvider {
             -string _basePath
+            +LocalStorageProvider(string basePath)
             +WriteAsync(string profileId, string fileName, string data) Task
             +WriteImmediate(string profileId, string fileName, string data) void
             -WriteToFileAsync(string fullPath, string data) Task
@@ -92,9 +93,12 @@ classDiagram
             -PrepareDictionary(string fullPath) void
         }
 
-        class AesEncryptionProvider {
-            +Encrypt(string plainText, string secretKey) string
-            +Decrypt(string cipherText, string secretKey) string
+        class AESProvider {
+            -byte[] _keyBytes
+            +AESProvider(string secretKey)
+            +Encrypt(string plainText) string
+            +Decrypt(string cipherText) string
+            -DeriveKey(string secretKey) byte[]
         }
     }
 
@@ -124,9 +128,9 @@ classDiagram
     SaveManager --> SaveData : Manipulates
     ISavable ..> SaveData : Reads/Writes
 
-    NewtonsoftJsonSerializer ..|> ISerializer : Implements
+    JsonSerializer ..|> ISerializer : Implements
     LocalStorageProvider ..|> IStorageProvider : Implements
-    AesEncryptionProvider ..|> IEncryptionProvider : Implements
+    AESProvider ..|> IEncryptionProvider : Implements
 
     GameSaverBootstrapper ..> SaveManager : Configures & Instantiates
     AutoSaveRunner ..> SaveManager : Triggers Save
