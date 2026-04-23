@@ -8,9 +8,9 @@ classDiagram
     namespace Core {
         class ISavable {
             <<interface>>
-            +Type SaveType
-            +SaveData(SaveData data)
-            +LoadData(SaveData data)
+            +string SaveKey
+            +CaptureData() ISaveData
+            +RestoreData(ISaveData data)
         }
         
         class ISerializer {
@@ -52,13 +52,20 @@ classDiagram
         }
         
         class SaveSettings {
-            <<ScriptableObject/POCO>>
+            <<ScriptableObject>>
+            +bool CreateProfileIfNull
             +bool UseEncryption
             +bool SaveAsSeparateFiles
+            +string FileName
             +string FileExtension
-            +string SecretKey
+            +bool EnableAutoSave
+            +float AutoSaveTime
         }
         
+        class ISaveData {
+            <<interface>>
+        }
+
         class SaveData {
             +Dictionary~string, ISaveData~ DataModules
             +TryGetData()
@@ -103,7 +110,6 @@ classDiagram
     }
 
     %% --- LỚP TRÌNH DIỄN / UNITY INTEGRATION ---
-    graph LR
     namespace UnityIntegration {
         class GameSaverBootstrapper {
             <<MonoBehaviour>>
@@ -119,6 +125,14 @@ classDiagram
         }
     }
 
+    namespace GameImplementation {
+        class CustomSaveData {
+            <<User Defined>>
+            +int Health
+            +int Gold
+        }
+    }
+
     %% QUAN HỆ (RELATIONSHIPS)
     SaveManager ..> IStorageProvider : Depends on
     SaveManager ..> ISerializer : Depends on
@@ -127,6 +141,8 @@ classDiagram
     SaveManager "1" *-- "*" ISavable : Manages
     SaveManager --> SaveData : Manipulates
     ISavable ..> SaveData : Reads/Writes
+    SaveData o-- ISaveData : Aggregates
+    CustomSaveData ..|> ISaveData : Developer Implements
 
     JsonSerializer ..|> ISerializer : Implements
     LocalStorageProvider ..|> IStorageProvider : Implements
