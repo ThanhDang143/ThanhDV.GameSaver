@@ -46,7 +46,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <param name="data">The string content to write.</param>
         private async Task WriteToFileAsync(string fullPath, string data)
         {
-            PrepareDictionary(fullPath);
+            PrepareDirectory(fullPath);
             string tempPath = fullPath + Constant.FILE_TEMP_EXTENTION;
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
@@ -73,7 +73,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <param name="data">The string content to write.</param>
         private void WriteToFileImmediate(string fullPath, string data)
         {
-            PrepareDictionary(fullPath);
+            PrepareDirectory(fullPath);
             string tempPath = fullPath + Constant.FILE_TEMP_EXTENTION;
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
@@ -235,7 +235,7 @@ namespace ThanhDV.GameSaver.Infrastructure
 
                 FileInfo mostRecentFile = directory.EnumerateDirectories()
                                             .SelectMany(dir => dir.EnumerateFiles("*.*", SearchOption.AllDirectories))
-                                            .OrderByDescending(f => f.LastAccessTimeUtc)
+                                            .OrderByDescending(f => f.LastWriteTimeUtc)
                                             .FirstOrDefault();
 
                 return mostRecentFile?.Directory?.Name;
@@ -278,7 +278,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// Ensures the directory for the specified file path exists by creating it if needed.
         /// </summary>
         /// <param name="fullPath">The full path of the file.</param>
-        private void PrepareDictionary(string fullPath)
+        private void PrepareDirectory(string fullPath)
         {
             string dir = Path.GetDirectoryName(fullPath);
             if (string.IsNullOrEmpty(dir) || Directory.Exists(dir)) return;
