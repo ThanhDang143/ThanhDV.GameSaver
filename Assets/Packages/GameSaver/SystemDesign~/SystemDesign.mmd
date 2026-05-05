@@ -4,7 +4,7 @@ config:
 id: a2b2e2a4-97a9-411c-934f-6bb96bb3fbb2
 ---
 classDiagram
-    %% --- LỚP LÕI (CORE) ---
+    %% --- CORE ---
     namespace Core {
         class ISavable {
             <<interface>>
@@ -12,7 +12,17 @@ classDiagram
             +CaptureData() ISaveData
             +RestoreData(ISaveData data)
         }
-        
+
+        class ISaveData {
+            <<interface>>
+        }
+
+        class ISaveMeta {
+            <<interface>>
+            +string ProfileID
+            +DateTime LastTimeSaved
+        }
+
         class ISerializer {
             <<interface>>
             +Serialize~T~(T obj) string
@@ -38,19 +48,6 @@ classDiagram
             +Decrypt(string cipherText) string
         }
 
-        class SaveManager {
-            -IStorageProvider _storage
-            -ISerializer _serializer
-            -IEncryptionProvider _encryption
-            -SaveSettings _settings
-            -HashSet~ISavable~ _savables
-            +Register(ISavable savable)
-            +Unregister(ISavable savable)
-            +SaveGameAsync() Task
-            +SaveGameImmediate() void
-            +LoadGameAsync() Task
-        }
-        
         class SaveSettings {
             <<ScriptableObject>>
             +bool CreateProfileIfNull
@@ -61,22 +58,85 @@ classDiagram
             +bool EnableAutoSave
             +float AutoSaveTime
         }
-        
-        class ISaveData {
-            <<interface>>
-        }
 
         class SaveData {
             +Dictionary~string, ISaveData~ DataModules
-            +TryGetData()
-            +TryAddData()
+            +GetData~T~(string customKey) T
+            +SetData~T~(T data, string customKey) void
+            +RemoveData~T~(string customKey) void
+        }
+
+        class SaveRegistry {
+            -HashSet~ISavable~ _savables
+            +IEnumerable~ISavable~ Savables
+            +Action~ISavable~ OnSavableRegistered
+            +Action~ISavable~ OnSavableUnregistered
+            +Register(ISavable savable) void
+            +Unregister(ISavable savable) void
+        }
+
+        class GameSaver {
+            -SaveRegistry _registry
+            -IStorageProvider _storageProvider
+            -ISerializer _serializer
+            -IEncryptionProvider _encryptionProvider
+            -SaveSettings _settings
+            -SaveData _curSaveData
+            -string _curProfileId
+            +GameSaver(SaveRegistry registry, IStorageProvider storageProvider, ISerializer serializer, IEncryptionProvider encryptionProvider, SaveSettings settings)
+            +GetMostRecentProfileId() string
+            +GetAllProfiles() IEnumerable~string~
+            +DeleteProfile(string profileId) void
+            +SaveAsync(string profileId) GameSaverOperationHandle
+            +SaveImmediate(string profileId) void
+            +RestoreBackup(string profileId) void
+            +LoadAsync(string profileId) GameSaverOperationHandle
+            +LoadBackupAsync(string profileId) GameSaverOperationHandle
+            +LoadMostRecentAsync() GameSaverOperationHandle
+            +Dispose() void
         }
     }
 
-    %% --- LỚP HẠ TẦNG (INFRASTRUCTURE) ---
+    %% --- ASYNC OPERATION ---
+    namespace Operation {
+        class GameSaverOperationStatus {
+            <<enumeration>>
+            Pending
+            Succeeded
+            Failed
+        }
+
+        class GameSaverOperationHandle {
+            +bool IsDone
+            +GameSaverOperationStatus Status
+            +float PercentComplete
+            +Exception Error
+            +Action~GameSaverOperationHandle~ Completed
+            +GetAwaiter() GameSaverAwaiter
+        }
+
+        class GameSaverAwaiter {
+            +bool IsCompleted
+            +OnCompleted(Action continuation) void
+            +GetResult() void
+        }
+
+        class GameSaverOperationInternal {
+            -GameSaverOperationStatus Status
+            -float PercentComplete
+            -Exception Error
+            -bool IsDone
+            -Action~GameSaverOperationHandle~ Completed
+            -Action ContinuationAction
+            +Complete(Exception error) void
+        }
+    }
+
+    %% --- INFRASTRUCTURE ---
     namespace Infrastructure {
         class JsonSerializer {
             -JsonSerializerSettings _settings
+            +JsonSerializer()
             +Serialize~T~(T obj) string
             +Deserialize~T~(string data) T
         }
@@ -97,7 +157,7 @@ classDiagram
             +GetMostRecentProfileId() string
             +Exists(string profileId, string fileName) bool
             -GetFullPath(string profileId, string fileName) string
-            -PrepareDictionary(string fullPath) void
+            -PrepareDirectory(string fullPath) void
         }
 
         class AESProvider {
@@ -109,22 +169,7 @@ classDiagram
         }
     }
 
-    %% --- LỚP TRÌNH DIỄN / UNITY INTEGRATION ---
-    namespace UnityIntegration {
-        class GameSaverBootstrapper {
-            <<MonoBehaviour>>
-            -SaveSettings _settingsAsset
-            +Awake()
-            +OnApplicationQuit()
-        }
-        
-        class AutoSaveRunner {
-            <<MonoBehaviour>>
-            -SaveManager _saveManager
-            +StartAutoSave()
-        }
-    }
-
+    %% --- EXAMPLE GAME DATA ---
     namespace GameImplementation {
         class CustomSaveData {
             <<User Defined>>
@@ -133,20 +178,24 @@ classDiagram
         }
     }
 
-    %% QUAN HỆ (RELATIONSHIPS)
-    SaveManager ..> IStorageProvider : Depends on
-    SaveManager ..> ISerializer : Depends on
-    SaveManager ..> IEncryptionProvider : Depends on
-    SaveManager ..> SaveSettings : Depends on
-    SaveManager "1" *-- "*" ISavable : Manages
-    SaveManager --> SaveData : Manipulates
-    ISavable ..> SaveData : Reads/Writes
-    SaveData o-- ISaveData : Aggregates
-    CustomSaveData ..|> ISaveData : Developer Implements
+    %% RELATIONSHIPS
+    SaveRegistry "1" *-- "*" ISavable : tracks
+    GameSaver ..> SaveRegistry : subscribes to
+    GameSaver ..> IStorageProvider : uses
+    GameSaver ..> ISerializer : uses
+    GameSaver ..> IEncryptionProvider : uses
+    GameSaver ..> SaveSettings : uses
+    GameSaver --> SaveData : owns active state
+    GameSaver --> GameSaverOperationHandle : returns
+    SaveData o-- ISaveData : stores modules
+    ISavable ..> ISaveData : capture/restore
+    ISavable ..> SaveData : keyed by SaveKey
+    CustomSaveData ..|> ISaveData : implements
 
-    JsonSerializer ..|> ISerializer : Implements
-    LocalStorageProvider ..|> IStorageProvider : Implements
-    AESProvider ..|> IEncryptionProvider : Implements
+    JsonSerializer ..|> ISerializer : implements
+    LocalStorageProvider ..|> IStorageProvider : implements
+    AESProvider ..|> IEncryptionProvider : implements
 
-    GameSaverBootstrapper ..> SaveManager : Configures & Instantiates
-    AutoSaveRunner ..> SaveManager : Triggers Save
+    GameSaverOperationHandle ..> GameSaverAwaiter : awaitable via
+    GameSaverOperationHandle ..> GameSaverOperationInternal : wraps
+    GameSaverOperationInternal --> GameSaverOperationStatus : tracks

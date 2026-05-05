@@ -7,16 +7,15 @@ namespace ThanhDV.GameSaver.Core
     public class SaveSettings : ScriptableObject
     {
         [UnderlineHeader("Storage Settings")]
-        [SerializeField] private bool createProfileIfNull = true; public bool CreateProfileIfNull => createProfileIfNull;
-        [SerializeField] private bool useEncryption = true; public bool UseEncryption => useEncryption;
+        [SerializeField] private bool _createProfileIfNull = true; public bool CreateProfileIfNull => _createProfileIfNull;
+        [SerializeField] private bool _useEncryption = true; public bool UseEncryption => _useEncryption;
 
-        [SerializeField, Tooltip("If checked, each data module will be saved as a separate file.")]
-        private bool saveAsSeparateFiles = false; public bool SaveAsSeparateFiles => saveAsSeparateFiles;
-        [SerializeField, HideIf("saveAsSeparateFiles")] private string fileName = Constant.DEFAULT_FILE_NAME; public string FileName => fileName;
-        [SerializeField, Tooltip("File extension (include leading dot).")] private string fileExtension = Constant.DEFAULT_FILE_SAVE_EXTENSION; public string FileExtension => fileExtension;
+        [SerializeField] private string _fileName = Constant.DEFAULT_FILE_NAME; public string FileName => _fileName;
+        [SerializeField, Tooltip("File extension (include leading dot). ")] private string _saveExtension = Constant.DEFAULT_FILE_SAVE_EXTENSION; public string SaveExtension => _saveExtension;
+        [SerializeField, Tooltip("File extension (include leading dot). ")] private string _metaExtension = Constant.DEFAULT_FILE_META_EXTENSION; public string MetaExtension => _metaExtension;
 
         [UnderlineHeader("Auto Save")]
-        [SerializeField] private bool enableAutoSave = true; public bool EnableAutoSave => enableAutoSave;
-        [SerializeField, Tooltip("Second."), ShowIf("enableAutoSave")] private float autoSaveTime = 300f; public float AutoSaveTime => autoSaveTime;
+        [SerializeField] private bool _enableAutoSave = true; public bool EnableAutoSave => _enableAutoSave;
+        [SerializeField, Tooltip("Second."), ShowIf("enableAutoSave")] private float _autoSaveTime = 300f; public float AutoSaveTime => _autoSaveTime;
     }
 }

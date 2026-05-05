@@ -16,7 +16,10 @@ namespace ThanhDV.GameSaver.Core
         private readonly SaveSettings _settings;
 
         private SaveData _curSaveData = new();
-        private string _curProfileId; public string CurrentProfileId => _curProfileId;
+        private string _curProfileId;
+
+        private string MetaName => _settings.FileName + _settings.MetaExtension;
+        private string SaveName => _settings.FileName + _settings.SaveExtension;
 
         /// <summary>
         /// Initializes a new instance of the GameSaver class.
@@ -36,6 +39,21 @@ namespace ThanhDV.GameSaver.Core
         }
 
         #region Profile Management
+
+        /// <summary>
+        /// Asynchronously fetches the metadata for all existing profiles.
+        /// This is particularly useful for constructing save-slot selection menus.
+        /// </summary>
+        /// <typeparam name="T">The type of metadata model, implementing <see cref="ISaveMeta"/>.</typeparam>
+        /// <returns>A tracking handle providing a list of all successfully parsed metadata files.</returns>
+        public GameSaverOperationHandle<List<T>> GetAllMetadataAsync<T>() where T : class, ISaveMeta
+        {
+            GameSaverOperationInternal<List<T>> internalOp = new();
+
+            _ = ProcessLoadAllMetadataAsync(internalOp);
+
+            return new GameSaverOperationHandle<List<T>>(internalOp);
+        }
 
         /// <summary>
         /// Retrieves the ID of the most recently modified profile.
@@ -83,12 +101,13 @@ namespace ThanhDV.GameSaver.Core
         /// Asynchronously saves the current game state to the specified profile.
         /// </summary>
         /// <param name="profileId">The target profile ID. If null, the currently active profile is used.</param>
+        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
         /// <returns>A handle to track the progress and completion of the save operation.</returns>
-        public GameSaverOperationHandle SaveAsync(string profileId = null)
+        public GameSaverOperationHandle SaveAsync(string profileId = null, ISaveMeta metadata = null)
         {
             GameSaverOperationInternal internalOp = new();
 
-            _ = ProcessSaveAsync(profileId, internalOp);
+            _ = ProcessSaveAsync(profileId, metadata, internalOp);
 
             return new GameSaverOperationHandle(internalOp);
         }
@@ -98,8 +117,9 @@ namespace ThanhDV.GameSaver.Core
         /// This is a blocking operation and should be used with caution to avoid frame drops.
         /// </summary>
         /// <param name="profileId">The target profile ID. If null, the currently active profile is used.</param>
+        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
         /// <exception cref="InvalidOperationException">Thrown when no valid profile ID can be determined.</exception>
-        public void SaveImmediate(string profileId = null)
+        public void SaveImmediate(string profileId = null, ISaveMeta metadata = null)
         {
             string targetProfile = profileId ?? _curProfileId;
 
@@ -111,9 +131,17 @@ namespace ThanhDV.GameSaver.Core
 
                 string data = _serializer.Serialize(_curSaveData);
                 string finalData = _settings.UseEncryption ? _encryptionProvider.Encrypt(data) : data;
-                string fileName = _settings.FileName + _settings.FileExtension;
 
-                _storageProvider.WriteImmediate(targetProfile, fileName, finalData);
+                _storageProvider.WriteImmediate(targetProfile, SaveName, finalData);
+
+                if (metadata != null)
+                {
+                    metadata.ProfileID = targetProfile;
+                    metadata.LastTimeSaved = DateTime.UtcNow;
+
+                    string metaJson = _serializer.Serialize(metadata);
+                    _storageProvider.WriteImmediate(targetProfile, MetaName, metaJson);
+                }
 
                 _curProfileId = targetProfile;
 
@@ -135,9 +163,7 @@ namespace ThanhDV.GameSaver.Core
         {
             if (string.IsNullOrEmpty(profileId)) throw new ArgumentNullException(nameof(profileId), "ProfileId cannot be null or empty.");
 
-            string fileName = _settings.FileName + _settings.FileExtension;
-
-            _storageProvider.RestoreBackup(profileId, fileName);
+            _storageProvider.RestoreBackup(profileId, SaveName);
         }
 
         /// <summary>
@@ -208,7 +234,8 @@ namespace ThanhDV.GameSaver.Core
         /// </summary>
         /// <param name="profileId">The target profile ID, which defaults to current if omitted.</param>
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
-        private async Task ProcessSaveAsync(string profileId, GameSaverOperationInternal internalOp)
+        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
+        private async Task ProcessSaveAsync(string profileId, ISaveMeta metadata, GameSaverOperationInternal internalOp)
         {
             try
             {
@@ -228,11 +255,20 @@ namespace ThanhDV.GameSaver.Core
                 });
                 internalOp.PercentComplete = 0.5f;
 
-                string fileName = _settings.FileName + _settings.FileExtension;
-                await _storageProvider.WriteAsync(targetProfile, fileName, finalData);
+                await _storageProvider.WriteAsync(targetProfile, SaveName, finalData);
+
+                internalOp.PercentComplete = 0.8f;
+                if (metadata != null)
+                {
+                    metadata.ProfileID = targetProfile;
+                    metadata.LastTimeSaved = DateTime.UtcNow;
+
+                    string metaJson = await Task.Run(() => _serializer.Serialize(metadata));
+                    await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson);
+                }
 
                 _curProfileId = targetProfile;
-                internalOp.PercentComplete = 0.8f;
+                internalOp.PercentComplete = 1f;
 
                 internalOp.Complete();
             }
@@ -255,18 +291,17 @@ namespace ThanhDV.GameSaver.Core
             {
                 if (string.IsNullOrEmpty(profileId)) throw new InvalidOperationException("Cannot load: No valid ProfileId was provided or found.");
 
-                string fileName = _settings.FileName + _settings.FileExtension;
                 string rawData;
 
                 internalOp.PercentComplete = 0.1f;
                 // Fetch basic structured data, parsing depends on whether reading standard save or backup
                 if (isBackup)
                 {
-                    rawData = await _storageProvider.ReadBackupAsync(profileId, fileName);
+                    rawData = await _storageProvider.ReadBackupAsync(profileId, SaveName);
                 }
                 else
                 {
-                    rawData = await _storageProvider.ReadAsync(profileId, fileName);
+                    rawData = await _storageProvider.ReadAsync(profileId, SaveName);
                 }
 
                 internalOp.PercentComplete = 0.3f;
@@ -307,9 +342,63 @@ namespace ThanhDV.GameSaver.Core
             }
             catch (Exception e)
             {
-                DebugLog.Error($"[GameSaver] Failed to load data: {e.Message}");
+                DebugLog.Error($"Failed to load data: {e.Message}");
 
                 internalOp.Complete(e);
+            }
+        }
+
+        /// <summary>
+        /// Asynchronously loads and deserializes metadata from all available profiles.
+        /// The resulting collection is sorted by the most recent save time.
+        /// Corrupted or missing metadata files are safely skipped without halting the overall process.
+        /// </summary>
+        /// <typeparam name="T">The concrete metadata type, which must implement <see cref="ISaveMeta"/>.</typeparam>
+        /// <param name="internalOp">Operation context to report status, completion, and progress scaling.</param>
+        private async Task ProcessLoadAllMetadataAsync<T>(GameSaverOperationInternal<List<T>> internalOp) where T : class, ISaveMeta
+        {
+            try
+            {
+                List<string> profiles = _storageProvider.GetAllProfileIds().ToList();
+                List<T> metadatas = new();
+                int profileCount = profiles.Count;
+
+                if (profileCount == 0)
+                {
+                    internalOp.Complete(metadatas);
+                    return;
+                }
+
+                for (int i = 0; i < profileCount; i++)
+                {
+                    string profile = profiles[i];
+
+                    if (_storageProvider.Exists(profile, MetaName))
+                    {
+                        try
+                        {
+                            string metaJson = await _storageProvider.ReadAsync(profile, MetaName);
+                            T metadata = await Task.Run(() => _serializer.Deserialize<T>(metaJson));
+                            if (metadata != null) metadatas.Add(metadata);
+                        }
+                        catch (Exception e)
+                        {
+                            // Intentionally do not throw to continue loading other profiles
+                            DebugLog.Warning($"Skipped metadata of Profile {profile} due to read error: {e.Message}");
+                        }
+                    }
+
+                    internalOp.PercentComplete = (float)(i + 1) / profileCount;
+                }
+
+                // Sort by most recent first
+                metadatas.Sort((a, b) => b.LastTimeSaved.CompareTo(a.LastTimeSaved));
+                internalOp.Complete(metadatas);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Error($"Failed to load metadata: {e.Message}");
+                internalOp.Complete(null, e);
             }
         }
 

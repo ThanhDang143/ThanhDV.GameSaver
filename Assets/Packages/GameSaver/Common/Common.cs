@@ -3,6 +3,7 @@ namespace ThanhDV.GameSaver.Common
     public static class Constant
     {
         public const string DEFAULT_FILE_SAVE_EXTENSION = ".tdv";
+        public const string DEFAULT_FILE_META_EXTENSION = ".meta";
         public const string DEFAULT_FILE_NAME = "Default";
         public const string DEFAULT_PROFILE_ID = "PROFILE A";
 
