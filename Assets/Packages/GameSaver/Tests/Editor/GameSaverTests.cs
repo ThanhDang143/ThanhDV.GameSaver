@@ -331,6 +331,79 @@ namespace ThanhDV.GameSaver.Tests.Editor
             Assert.That(profiles, Is.EqualTo(new[] { "a", "b" }));
         }
 
+        [Test]
+        public void SetSimple_ThenGetSimple_ReturnsStoredValue()
+        {
+            _gameSaver.SetSimple("coins", 123);
+
+            int value = _gameSaver.GetSimple("coins", -1);
+
+            Assert.That(value, Is.EqualTo(123));
+            Assert.That(_gameSaver.HasSimpleKey("coins"), Is.True);
+        }
+
+        [Test]
+        public void DeleteSimple_RemovesStoredValueAndKey()
+        {
+            _gameSaver.SetSimple("volume", 8);
+
+            _gameSaver.DeleteSimple("volume");
+
+            Assert.That(_gameSaver.HasSimpleKey("volume"), Is.False);
+            Assert.That(_gameSaver.GetSimple("volume", -1), Is.EqualTo(-1));
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        public void DirectAccess_WithInvalidKey_IsIgnored(string key)
+        {
+            _gameSaver.SetSimple("existing", 7);
+
+            _gameSaver.SetSimple(key, 99);
+            int value = _gameSaver.GetSimple(key, -1);
+            bool hasKey = _gameSaver.HasSimpleKey(key);
+            _gameSaver.DeleteSimple(key);
+
+            Assert.That(value, Is.EqualTo(-1));
+            Assert.That(hasKey, Is.False);
+            Assert.That(_gameSaver.GetSimple("existing", -1), Is.EqualTo(7));
+        }
+
+        [UnityTest]
+        public IEnumerator GetSimple_WhenDeserializationFails_ReturnsDefaultValue()
+        {
+            SaveData loadedData = new();
+            loadedData.SimpleData["broken"] = "broken-simple";
+            string serialized = _serializer.RegisterSerializedValue(loadedData);
+            _serializer.RegisterDeserializeException("broken-simple", new FormatException("invalid simple data"));
+            _storage.SetPrimaryFile("profile-broken-simple", SaveFileName, serialized);
+
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-broken-simple");
+            yield return WaitForOperation(handle);
+
+            int value = _gameSaver.GetSimple("broken", 99);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(value, Is.EqualTo(99));
+        }
+
+        [UnityTest]
+        public IEnumerator SaveImmediate_ThenLoadAsync_PreservesSimpleData()
+        {
+            _gameSaver.SetSimple("coins", 25);
+            _gameSaver.SetSimple("player-name", "Ada");
+            _gameSaver.SaveImmediate("profile-simple");
+            _gameSaver.SetSimple("coins", 1);
+            _gameSaver.DeleteSimple("player-name");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-simple");
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(_gameSaver.GetSimple("coins", -1), Is.EqualTo(25));
+            Assert.That(_gameSaver.GetSimple("player-name", string.Empty), Is.EqualTo("Ada"));
+        }
+
         [UnityTest]
         public IEnumerator RegistryEvents_AutoRestoreOnRegister_AndCaptureOnUnregister()
         {
@@ -609,6 +682,11 @@ namespace ThanhDV.GameSaver.Tests.Editor
                 foreach (KeyValuePair<string, ISaveData> item in source.DataModules)
                 {
                     clone.DataModules[item.Key] = (ISaveData)CloneObject(item.Value);
+                }
+
+                foreach (KeyValuePair<string, string> item in source.SimpleData)
+                {
+                    clone.SimpleData[item.Key] = item.Value;
                 }
 
                 return clone;

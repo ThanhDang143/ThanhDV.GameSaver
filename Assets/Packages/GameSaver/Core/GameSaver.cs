@@ -404,6 +404,92 @@ namespace ThanhDV.GameSaver.Core
 
         #endregion
 
+        #region Direct Access
+
+        /// <summary>
+        /// Directly stores a primitive variable (int, float, string, etc.) or a small struct in memory.
+        /// A convenience API similar to Easy Save.
+        /// Note: You still need to call SaveAsync() or SaveImmediate() to persist the data to disk.
+        /// </summary>
+        /// <typeparam name="T">The type of the value being stored.</typeparam>
+        /// <param name="key">The unique identifier for the value.</param>
+        /// <param name="value">The value to store.</param>
+        public void SetSimple<T>(string key, T value)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                DebugLog.Error("Cannot set data: Key is null or empty.");
+                return;
+            }
+
+            string serializedValue = _serializer.Serialize(value);
+            _curSaveData.SimpleData[key] = serializedValue;
+        }
+
+        /// <summary>
+        /// Retrieves a value directly from memory by its key. Returns the provided defaultValue if it was never saved.
+        /// </summary>
+        /// <typeparam name="T">The expected type of the value.</typeparam>
+        /// <param name="key">The unique identifier for the value.</param>
+        /// <param name="defaultValue">The fallback value to return if the key doesn't exist or parsing fails. Defaults to default(T).</param>
+        /// <returns>The deserialized value of type T, or the defaultValue if not found.</returns>
+        public T GetSimple<T>(string key, T defaultValue = default)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                DebugLog.Error("Cannot get data: Key is null or empty.");
+                return defaultValue;
+            }
+
+            if (_curSaveData.SimpleData.TryGetValue(key, out string serializedValue))
+            {
+                try
+                {
+                    return _serializer.Deserialize<T>(serializedValue);
+                }
+                catch (Exception e)
+                {
+                    DebugLog.Error($"Failed to parse data for key '{key}': {e.Message}. Returning default value.");
+                    return defaultValue;
+                }
+            }
+
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Checks if a specific key has been saved in memory.
+        /// </summary>
+        /// <param name="key">The unique identifier to check.</param>
+        /// <returns>True if the key exists, otherwise false.</returns>
+        public bool HasSimpleKey(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                DebugLog.Error("Cannot check key: Key is null or empty.");
+                return false;
+            }
+
+            return _curSaveData.SimpleData.ContainsKey(key);
+        }
+
+        /// <summary>
+        /// Deletes a specific key and its associated value from memory.
+        /// </summary>
+        /// <param name="key">The unique identifier of the data to remove.</param>
+        public void DeleteSimple(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                DebugLog.Error("Cannot delete data: Key is null or empty.");
+                return;
+            }
+
+            _curSaveData.SimpleData.Remove(key);
+        }
+
+        #endregion
+
         #region The Safety Net
 
         /// <summary>

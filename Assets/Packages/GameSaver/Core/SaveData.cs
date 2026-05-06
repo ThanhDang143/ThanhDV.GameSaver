@@ -10,55 +10,61 @@ namespace ThanhDV.GameSaver.Core
     {
         /// <summary>
         /// Dictionary storing the data modules. Each implementation of ISaveData is considered a module.
-        /// Must be public for NewtonSoft JSON serialization to work properly.
+        /// Must be public for Newtonsoft.Json serialization to work properly.
         /// </summary>
         public Dictionary<string, ISaveData> DataModules { get; set; } = new();
 
         /// <summary>
-        /// Retrieves a specific data module of type T. Creates a new instance if it doesn't exist.
+        /// Dictionary storing individual values for direct in-memory read and write operations.
+        /// Use this for standalone values that do not warrant a dedicated ISaveData module.
         /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
-        /// <returns>The requested data module of type T.</returns>
-        public T GetData<T>(string customKey = null) where T : class, ISaveData, new()
-        {
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
+        public Dictionary<string, string> SimpleData { get; set; } = new();
 
-            if (DataModules.TryGetValue(key, out ISaveData data))
-            {
-                return data as T;
-            }
+        // /// <summary>
+        // /// Retrieves a specific data module of type T. Creates a new instance if it doesn't exist.
+        // /// </summary>
+        // /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
+        // /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
+        // /// <returns>The requested data module of type T.</returns>
+        // public T GetData<T>(string customKey = null) where T : class, ISaveData, new()
+        // {
+        //     string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
 
-            // Create a new instance if it doesn't exist
-            T newData = new();
-            DataModules[key] = newData;
-            return newData;
-        }
+        //     if (DataModules.TryGetValue(key, out ISaveData data))
+        //     {
+        //         return data as T;
+        //     }
 
-        /// <summary>
-        /// Stores or updates a specific data module.
-        /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="data">The data module instance to store.</param>
-        /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
-        public void SetData<T>(T data, string customKey = null) where T : class, ISaveData
-        {
-            if (data == null) return;
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
+        //     // Create a new instance if it doesn't exist
+        //     T newData = new();
+        //     DataModules[key] = newData;
+        //     return newData;
+        // }
 
-            DataModules[key] = data;
-        }
+        // /// <summary>
+        // /// Stores or updates a specific data module.
+        // /// </summary>
+        // /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
+        // /// <param name="data">The data module instance to store.</param>
+        // /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
+        // public void SetData<T>(T data, string customKey = null) where T : class, ISaveData
+        // {
+        //     if (data == null) return;
+        //     string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
 
-        /// <summary>
-        /// Removes a specific data module from the save data.
-        /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="customKey">An optional custom key identifying the data module to remove. Defaults to the type name.</param>
-        public void RemoveData<T>(string customKey = null) where T : class, ISaveData
-        {
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
+        //     DataModules[key] = data;
+        // }
 
-            if (DataModules.ContainsKey(key)) DataModules.Remove(key);
-        }
+        // /// <summary>
+        // /// Removes a specific data module from the save data.
+        // /// </summary>
+        // /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
+        // /// <param name="customKey">An optional custom key identifying the data module to remove. Defaults to the type name.</param>
+        // public void RemoveData<T>(string customKey = null) where T : class, ISaveData
+        // {
+        //     string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
+
+        //     if (DataModules.ContainsKey(key)) DataModules.Remove(key);
+        // }
     }
 }
