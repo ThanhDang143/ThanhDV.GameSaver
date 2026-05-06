@@ -127,20 +127,18 @@ namespace ThanhDV.GameSaver.Tests
         }
 
         [Test]
-        public void WriteImmediate_CreatesDirectory_WhenNestedFolderIsUsed()
+        public void WriteImmediate_WithNestedProfileId_ThrowsArgumentException()
         {
-            // Arrange (Tạo profileId dưới dạng chuỗi thư mục lồng nhau)
-            string profileId = "profile_nested/subfolder/deep";
+            // Arrange (Cố tình tạo ProfileId chứa dấu gạch chéo)
+            string invalidProfileId = "profile_nested/subfolder/deep";
             string fileName = "save.dat";
             string data = "test path creation";
 
-            // Act
-            _provider.WriteImmediate(profileId, fileName, data);
-
-            // Assert
-            string expectedFilePath = Path.Combine(_testBasePath, profileId, fileName);
-            Assert.IsTrue(Directory.Exists(Path.GetDirectoryName(expectedFilePath)), "Nested directories should be created.");
-            Assert.IsTrue(File.Exists(expectedFilePath));
+            // Act & Assert (Phải ném ra ArgumentException)
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.WriteImmediate(invalidProfileId, fileName, data),
+                "System should throw ArgumentException when a nested profile ID is provided."
+            );
         }
 
         #region Read Tests

@@ -375,17 +375,32 @@ namespace ThanhDV.GameSaver.Core
 
                     if (_storageProvider.Exists(profile, MetaName))
                     {
+                        T metadata = null;
+
                         try
                         {
                             string metaJson = await _storageProvider.ReadAsync(profile, MetaName);
-                            T metadata = await Task.Run(() => _serializer.Deserialize<T>(metaJson));
-                            if (metadata != null) metadatas.Add(metadata);
+                            metadata = await Task.Run(() => _serializer.Deserialize<T>(metaJson));
                         }
-                        catch (Exception e)
+                        catch (Exception primaryEx)
                         {
-                            // Intentionally do not throw to continue loading other profiles
-                            DebugLog.Warning($"Skipped metadata of Profile {profile} due to read error: {e.Message}");
+                            // Intentionally do not throw and try to load backup
+                            DebugLog.Warning($"Primary Metadata file for Profile '{profile}' is corrupted ({primaryEx.Message}). Attempting to load from Backup...");
+
+                            try
+                            {
+                                string backupJson = await _storageProvider.ReadBackupAsync(profile, MetaName);
+                                metadata = await Task.Run(() => _serializer.Deserialize<T>(backupJson));
+
+                                DebugLog.Success($"Successfully loaded Metadata from Backup file for Profile '{profile}'.");
+                            }
+                            catch (Exception backupEx)
+                            {
+                                DebugLog.Error($"Both primary and Backup files for Profile '{profile}' are corrupted ({backupEx.Message}). Skipping this Slot.");
+                            }
                         }
+
+                        if (metadata != null) metadatas.Add(metadata);
                     }
 
                     internalOp.PercentComplete = (float)(i + 1) / profileCount;

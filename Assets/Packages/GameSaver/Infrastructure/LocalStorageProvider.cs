@@ -29,12 +29,16 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <param name="data">The data to write to the file.</param>
         public async Task WriteAsync(string profileId, string fileName, string data)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
             await WriteToFileAsync(fullPath, data);
         }
 
         public void WriteImmediate(string profileId, string fileName, string data)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
             WriteToFileImmediate(fullPath, data);
         }
@@ -118,6 +122,8 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <param name="fileName">The target save file name to restore.</param>
         public void RestoreBackup(string profileId, string fileName)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
@@ -150,6 +156,8 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <returns>A task that resolves to the file content string.</returns>
         public async Task<string> ReadAsync(string profileId, string fileName)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
 
             if (!File.Exists(fullPath))
@@ -169,6 +177,8 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <returns>A task that resolves to the backup file content string.</returns>
         public async Task<string> ReadBackupAsync(string profileId, string fileName)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
@@ -191,7 +201,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <param name="profileId">The target profile ID to delete.</param>
         public void DeleteProfile(string profileId)
         {
-            if (string.IsNullOrEmpty(profileId)) return;
+            ValidateProfileId(profileId);
 
             string profilePath = Path.Combine(_basePath, profileId);
             if (Directory.Exists(profilePath))
@@ -255,6 +265,8 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <returns>True if either the primary save or its backup exists, false otherwise.</returns>
         public bool Exists(string profileId, string fileName)
         {
+            ValidateProfileId(profileId);
+
             string fullPath = GetFullPath(profileId, fileName);
             return File.Exists(fullPath) || File.Exists(fullPath + Constant.FILE_BACKUP_EXTENTION);
         }
@@ -284,6 +296,22 @@ namespace ThanhDV.GameSaver.Infrastructure
             if (string.IsNullOrEmpty(dir) || Directory.Exists(dir)) return;
 
             Directory.CreateDirectory(dir);
+        }
+
+        /// <summary>
+        /// Ensures that the Profile ID is a valid directory name, containing no prohibited characters or nested paths.
+        /// </summary>
+        /// <param name="profileId">The profile ID to validate.</param>
+        /// <exception cref="ArgumentException">Thrown when the profile ID contains invalid file name characters or directory separators.</exception>
+        private void ValidateProfileId(string profileId)
+        {
+            if (string.IsNullOrEmpty(profileId)) return;
+
+            // Check for characters prohibited by the OS and directory separator slashes (/, \)
+            if (profileId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || profileId.Contains(Path.DirectorySeparatorChar) || profileId.Contains(Path.AltDirectorySeparatorChar))
+            {
+                throw new ArgumentException($"ProfileId '{profileId}' is invalid. The system does not support nested directories or special characters.", nameof(profileId));
+            }
         }
 
         #endregion
