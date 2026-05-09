@@ -1,0 +1,89 @@
+name: Publish ThanhDV.GameSaver to Verdaccio
+
+# Triggered when a Git Tag matching v* is pushed
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-package:
+    runs-on: ubuntu-latest
+
+    # Set the default working directory to the Unity Tool package.json location
+    defaults:
+      run:
+        working-directory: Assets/Packages/GameSaver # <<<<<<< TODO: CHANGE FOR EACH PROJECT
+        
+    steps:
+      # Step 1: Checkout the source code at the pushed tag
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js 22 and point to your Verdaccio registry
+      - name: Setup NodeJS 22 & Registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://upm.thanhdv.com'
+
+      # Step 3: Install required dependencies before packaging
+      - name: Install Dependencies
+        run: npm install
+
+      # Step 4: Extract package name and version from package.json for Discord notification
+      - name: Extract Package Info
+        id: pkg-info
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          echo "name=$(node -p "require('./package.json').name")" >> $GITHUB_OUTPUT
+
+      # Step 5: Pack and publish to Verdaccio using the secure token
+      - name: Publish to Verdaccio
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.VERDACCIO_TOKEN }}
+
+      # Step 6: Send a Discord notification based on job result
+      # 1. Notify on SUCCESS
+      - name: Discord Notification (Success)
+        if: success()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          username: "GitHub Actions CI/CD"
+          status: success
+          nodetail: true # Removes extra detail lines (author, branch, commit) from the notification
+          title: "✅ Success: ${{ github.workflow }}"
+          description: |
+            Job `${{ github.workflow }}` build #${{ github.run_number }} published package `${{ steps.pkg-info.outputs.name }}@${{ steps.pkg-info.outputs.version }}` successfully.
+            Build Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Package URL: https://upm.thanhdv.com/-/web/detail/${{ steps.pkg-info.outputs.name }}
+
+      # 2. Notify on FAILURE
+      - name: Discord Notification (Failure)
+        if: failure()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          username: "GitHub Actions CI/CD"
+          status: failure
+          nodetail: true
+          title: "❌ Failure: ${{ github.workflow }}"
+          description: |
+            Job `${{ github.workflow }}` build #${{ github.run_number }} failed to publish package `${{ steps.pkg-info.outputs.name }}`.
+            Build Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      
+      # 3. Notify on CANCELLED
+      - name: Discord Notification (Cancelled)
+        if: cancelled()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          username: "GitHub Actions CI/CD"
+          status: cancelled
+          nodetail: true
+          title: "ℹ️ Cancelled: ${{ github.workflow }}"
+          description: |
+            Build #${{ github.run_number }} for job `${{ github.workflow }}` was aborted manually.
+            Build Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -222,11 +222,11 @@
       "url": "https://packages.unity.com"
     },
     "thanhdv.newtonsoft.json": {
-      "version": "https://github.com/ThanhDang143/ThanhDV.Newtonsoft.Json.git?path=/Assets/Packages/ThanhDV.Newtonsoft.Json",
+      "version": "3.2.6",
       "depth": 0,
-      "source": "git",
+      "source": "registry",
       "dependencies": {},
-      "hash": "363e23973e86fadb3eca31ecf5abeb32266950d6"
+      "url": "https://upm.thanhdv.com"
     },
     "com.unity.modules.ai": {
       "version": "1.0.0",

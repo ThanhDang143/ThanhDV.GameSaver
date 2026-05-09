@@ -18,12 +18,12 @@
         "url": "https://knowledge.thanhdv.com/"
     },
     "dependencies": {
-        "thanhdv.newtonsoft.json": "3.2.5"
+        "thanhdv.newtonsoft.json": "3.2.6"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/ThanhDang143/ThanhDV.GameSaver.git"
+        "url": "git+https://github.com/ThanhDV/ThanhDV.GameSaver.git"
     },
-    "changelogUrl": "https://github.com/ThanhDang143/ThanhDV.GameSaver/blob/main/Assets/Packages/GameSaver/CHANGELOG.md",
+    "changelogUrl": "https://github.com/ThanhDV/ThanhDV.GameSaver/blob/main/Assets/Packages/GameSaver/CHANGELOG.md",
     "license": "MIT"
 }
