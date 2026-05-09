@@ -22,6 +22,18 @@ namespace ThanhDV.GameSaver.Core
         private string SaveName => _settings.FileName + _settings.SaveExtension;
 
         /// <summary>
+        /// Per-profile save state for concurrency control. Each entry represents a profile that currently has
+        /// a save pipeline running and/or coalesced trailing requests waiting. Access must be guarded by _stateLock.
+        /// </summary>
+        private readonly Dictionary<string, ProfileSaveState> _saveStates = new();
+
+        /// <summary>
+        /// Lock guarding _saveStates, _curSaveData (both inner dictionaries), and _curProfileId.
+        /// Held only for short, await-free critical sections to avoid serializing IO.
+        /// </summary>
+        private readonly object _stateLock = new();
+
+        /// <summary>
         /// Initializes a new instance of the GameSaver class.
         /// It manages serialization, storage, and persistence operations. Subscribing to registry changes enables 
         /// automatic restoration of newly registered objects and captures state for the ones being unregistered.
@@ -78,16 +90,31 @@ namespace ThanhDV.GameSaver.Core
         /// If the deleted profile is the currently active one, the current profile state is completely cleared.
         /// </summary>
         /// <param name="profileId">The ID of the profile to delete.</param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a save operation is currently in flight for the same profile.
+        /// Wait for the save to complete (or for trailing saves to drain) before deleting.
+        /// </exception>
         public void DeleteProfile(string profileId)
         {
             if (string.IsNullOrEmpty(profileId)) return;
 
-            _storageProvider.DeleteProfile(profileId);
-
-            if (_curProfileId == profileId)
+            lock (_stateLock)
             {
-                _curProfileId = null;
-                _curSaveData = new();
+                // Reject if a save (async or immediate) is in flight for this profile.
+                if (_saveStates.TryGetValue(profileId, out ProfileSaveState saveState) && saveState.IsRunning)
+                {
+                    throw new InvalidOperationException($"Cannot delete profile '{profileId}' while a save operation is in flight for the same profile.");
+                }
+
+                _storageProvider.DeleteProfile(profileId);
+
+                if (_curProfileId == profileId)
+                {
+                    _curProfileId = null;
+                    _curSaveData = new();
+                }
+
+                _saveStates.Remove(profileId);
             }
 
             DebugLog.Success($"Successfully deleted profile: {profileId}");
@@ -107,7 +134,60 @@ namespace ThanhDV.GameSaver.Core
         {
             GameSaverOperationInternal internalOp = new();
 
-            _ = ProcessSaveAsync(profileId, metadata, internalOp);
+            string targetProfile = profileId ?? _curProfileId;
+            bool isImplicit = profileId == null;
+
+            if (string.IsNullOrEmpty(targetProfile))
+            {
+                InvalidOperationException error = new("Cannot save: No valid ProfileId was provided or found.");
+                internalOp.Complete(error);
+                return new GameSaverOperationHandle(internalOp);
+            }
+
+            bool startImmediate;
+            bool rejectedBySaveImmediate = false;
+            lock (_stateLock)
+            {
+                if (!_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState))
+                {
+                    saveState = new();
+                    _saveStates[targetProfile] = saveState;
+                }
+
+                if (saveState.IsRunning)
+                {
+                    if (saveState.IsSaveImmediate)
+                    {
+                        // A SaveImmediate is in flight — cannot coalesce into a synchronous run.
+                        rejectedBySaveImmediate = true;
+                        startImmediate = false;
+                    }
+                    else
+                    {
+                        // Normal coalesce: another SaveAsync is running.
+                        saveState.IsDirty = true;
+                        if (metadata != null) saveState.PendingMetadata = metadata;
+                        saveState.PendingHandles.Add(internalOp);
+                        startImmediate = false;
+                    }
+                }
+                else
+                {
+                    // No save in flight — claim the slot and start the leading pipeline.
+                    saveState.IsRunning = true;
+                    startImmediate = true;
+                }
+            }
+
+            if (rejectedBySaveImmediate)
+            {
+                InvalidOperationException error = new($"Cannot SaveAsync for profile '{targetProfile}' while a SaveImmediate is in flight.");
+                internalOp.Complete(error);
+            }
+            else if (startImmediate)
+            {
+                _ = ProcessSaveAsync(targetProfile, isImplicit, metadata, internalOp);
+            }
 
             return new GameSaverOperationHandle(internalOp);
         }
@@ -118,18 +198,36 @@ namespace ThanhDV.GameSaver.Core
         /// </summary>
         /// <param name="profileId">The target profile ID. If null, the currently active profile is used.</param>
         /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        /// <exception cref="InvalidOperationException">Thrown when no valid profile ID can be determined.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when no valid profile ID can be determined, or when another save operation is already in flight for the target profile.
+        /// </exception>
         public void SaveImmediate(string profileId = null, ISaveMeta metadata = null)
         {
             string targetProfile = profileId ?? _curProfileId;
+            bool isImplicit = profileId == null;
 
             if (string.IsNullOrEmpty(targetProfile)) throw new InvalidOperationException("Cannot save: No valid ProfileId was provided or found.");
 
+            SaveData snapshot;
+            lock (_stateLock)
+            {
+                if (_saveStates.TryGetValue(targetProfile, out ProfileSaveState existingSaveState) && existingSaveState.IsRunning)
+                {
+                    throw new InvalidOperationException($"Cannot SaveImmediate for profile '{targetProfile}' while another save operation is in flight.");
+                }
+
+                ProfileSaveState saveState = existingSaveState ?? new();
+                saveState.IsRunning = true;
+                saveState.IsSaveImmediate = true;
+                _saveStates[targetProfile] = saveState;
+
+                CaptureAllSavables();
+                snapshot = _curSaveData.Clone();
+            }
+
             try
             {
-                CaptureAllSavables();
-
-                string data = _serializer.Serialize(_curSaveData);
+                string data = _serializer.Serialize(snapshot);
                 string finalData = _settings.UseEncryption ? _encryptionProvider.Encrypt(data) : data;
 
                 _storageProvider.WriteImmediate(targetProfile, SaveName, finalData);
@@ -143,7 +241,7 @@ namespace ThanhDV.GameSaver.Core
                     _storageProvider.WriteImmediate(targetProfile, MetaName, metaJson);
                 }
 
-                _curProfileId = targetProfile;
+                if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
 
                 DebugLog.Success("Immediate save operation successful!");
             }
@@ -151,6 +249,24 @@ namespace ThanhDV.GameSaver.Core
             {
                 DebugLog.Error($"Immediate save failed: {e.Message}");
                 throw;
+            }
+            finally
+            {
+                // Release the slot. Because IsImmediate=true rejected all SaveAsync coalesce attempts,
+                // there should be no pending handles or dirty flag here.
+                lock (_stateLock)
+                {
+                    if (_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState))
+                    {
+                        saveState.IsRunning = false;
+                        saveState.IsSaveImmediate = false;
+
+                        if (!saveState.IsDirty && saveState.PendingHandles.Count == 0)
+                        {
+                            _saveStates.Remove(targetProfile);
+                        }
+                    }
+                }
             }
         }
 
@@ -229,28 +345,87 @@ namespace ThanhDV.GameSaver.Core
         #region Process Save/Load
 
         /// <summary>
-        /// Orchestrates the asynchronous, multi-step workflow required for saving: 
+        /// Orchestrates the save workflow for a single profile, including the trailing loop that drains
+        /// coalesced SaveAsync calls that arrived while the leading pipeline was running.
+        /// </summary>
+        /// <param name="targetProfile">The resolved profile ID to save to. Must be non-empty.</param>
+        /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
+        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
+        /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
+        private async Task ProcessSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, GameSaverOperationInternal internalOp)
+        {
+            await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, internalOp);
+
+            // Trailing loop: drain coalesced SaveAsync calls.
+            int iterations = 0;
+            while (true)
+            {
+                ISaveMeta trailingMetatdata;
+                GameSaverOperationInternal[] pendingOps;
+
+                lock (_stateLock)
+                {
+                    if (!_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState)) return;
+
+                    if (!saveState.IsDirty)
+                    {
+                        saveState.IsRunning = false;
+                        _saveStates.Remove(targetProfile);
+                        return;
+                    }
+
+                    trailingMetatdata = saveState.PendingMetadata;
+                    pendingOps = saveState.PendingHandles.ToArray();
+                    saveState.PendingHandles.Clear();
+                    saveState.PendingMetadata = null;
+                    saveState.IsDirty = false;
+                }
+
+                iterations++;
+                if (iterations > 2)
+                {
+                    DebugLog.Warning($"Save trailing loop running iteration #{iterations} for profile '{targetProfile}' — possible reentrancy.");
+                }
+
+                // Trailing pipeline is never "implicit" — it always targets the resolved profile explicitly.
+                // The leading pipeline already updated _curProfileId if needed.
+                GameSaverOperationInternal trailingOp = new();
+                await ProcessSingleSaveAsync(targetProfile, false, trailingMetatdata, trailingOp);
+
+                for (int i = 0; i < pendingOps.Length; i++)
+                {
+                    GameSaverOperationInternal op = pendingOps[i];
+                    op.Complete(trailingOp.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Executes a single save pipeline pass:
         /// capturing dynamic state, serializing, optionally encrypting, and persistently writing out.
         /// </summary>
-        /// <param name="profileId">The target profile ID, which defaults to current if omitted.</param>
+        /// <param name="targetProfile">The target profile ID, which defaults to current if omitted.</param>
+        /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        private async Task ProcessSaveAsync(string profileId, ISaveMeta metadata, GameSaverOperationInternal internalOp)
+        private async Task ProcessSingleSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, GameSaverOperationInternal internalOp)
         {
             try
             {
-                string targetProfile = profileId ?? _curProfileId;
-
-                if (string.IsNullOrEmpty(targetProfile)) throw new InvalidOperationException("Cannot save: No valid ProfileId was provided or found.");
-
                 internalOp.PercentComplete = 0.1f;
-                // Capture the current states of all tracked savables before persisting
-                CaptureAllSavables();
+
+                // Snapshot state under lock; serialization on background threads avoids shared-state corruption.
+                SaveData snapshot;
+                lock (_stateLock)
+                {
+                    CaptureAllSavables();
+                    snapshot = _curSaveData.Clone();
+                }
 
                 internalOp.PercentComplete = 0.2f;
                 string finalData = await Task.Run(() =>
                 {
-                    string data = _serializer.Serialize(_curSaveData);
+                    string data = _serializer.Serialize(snapshot);
                     return _settings.UseEncryption ? _encryptionProvider.Encrypt(data) : data;
                 });
                 internalOp.PercentComplete = 0.5f;
@@ -267,9 +442,9 @@ namespace ThanhDV.GameSaver.Core
                     await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson);
                 }
 
-                _curProfileId = targetProfile;
-                internalOp.PercentComplete = 1f;
+                if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
 
+                internalOp.PercentComplete = 1f;
                 internalOp.Complete();
             }
             catch (Exception e)
@@ -280,7 +455,8 @@ namespace ThanhDV.GameSaver.Core
 
         /// <summary>
         /// Orchestrates the asynchronous, multi-step workflow required for loading: 
-        /// reading from primary or backup storage, optionally decrypting on a separate thread, parsing string data, and progressively restoring registered objects.
+        /// rejecting the request if a save is in flight for the same profile, reading from primary or backup storage,
+        /// decrypting and parsing on a background thread, and progressively restoring registered objects.
         /// </summary>
         /// <param name="profileId">The ID to strictly load from.</param>
         /// <param name="isBackup">Indicator denoting whether the raw storage layer reads from standard file or backup.</param>
@@ -290,6 +466,14 @@ namespace ThanhDV.GameSaver.Core
             try
             {
                 if (string.IsNullOrEmpty(profileId)) throw new InvalidOperationException("Cannot load: No valid ProfileId was provided or found.");
+
+                lock (_stateLock)
+                {
+                    if (_saveStates.TryGetValue(profileId, out ProfileSaveState saveState) && saveState.IsRunning)
+                    {
+                        throw new InvalidOperationException($"Cannot load profile '{profileId}' while a save operation is in flight for the same profile.");
+                    }
+                }
 
                 string rawData;
 
@@ -312,11 +496,18 @@ namespace ThanhDV.GameSaver.Core
                     return _serializer.Deserialize<SaveData>(data);
                 });
 
-                _curSaveData = loadedData ?? new();
-                _curProfileId = profileId;
+                // Capture snapshots to isolate restore from concurrent SetSimple mutations.
+                List<ISavable> savableSnapshots;
+                SaveData restoreSnapshot;
+                lock (_stateLock)
+                {
+                    _curSaveData = loadedData ?? new();
+                    _curProfileId = profileId;
+                    savableSnapshots = _registry.Savables.ToList();
+                    restoreSnapshot = _curSaveData.Clone();
+                }
 
-                List<ISavable> savables = _registry.Savables.ToList();
-                int objectRegisteredCount = savables.Count;
+                int objectRegisteredCount = savableSnapshots.Count;
 
                 if (objectRegisteredCount > 0)
                 {
@@ -324,11 +515,12 @@ namespace ThanhDV.GameSaver.Core
                     float progressRange = 0.6f;
 
                     // Progressively inject loaded state back into each registered object
+                    // Reads from restoreSnapshot (local) — unaffected by concurrent SetSimple or parallel capture.
                     for (int i = 0; i < objectRegisteredCount; i++)
                     {
-                        RestoreSavable(savables[i], _curSaveData);
+                        RestoreSavable(savableSnapshots[i], restoreSnapshot);
 
-                        internalOp.PercentComplete = startProgress + ((float)(i + 1) / objectRegisteredCount) * progressRange;
+                        internalOp.PercentComplete = startProgress + (float)(i + 1) / objectRegisteredCount * progressRange;
                     }
                 }
                 else
@@ -438,7 +630,8 @@ namespace ThanhDV.GameSaver.Core
             }
 
             string serializedValue = _serializer.Serialize(value);
-            _curSaveData.SimpleData[key] = serializedValue;
+
+            lock (_stateLock) _curSaveData.SimpleData[key] = serializedValue;
         }
 
         /// <summary>
@@ -456,20 +649,21 @@ namespace ThanhDV.GameSaver.Core
                 return defaultValue;
             }
 
-            if (_curSaveData.SimpleData.TryGetValue(key, out string serializedValue))
-            {
-                try
-                {
-                    return _serializer.Deserialize<T>(serializedValue);
-                }
-                catch (Exception e)
-                {
-                    DebugLog.Error($"Failed to parse data for key '{key}': {e.Message}. Returning default value.");
-                    return defaultValue;
-                }
-            }
+            string serializedValue;
+            bool found;
+            lock (_stateLock) found = _curSaveData.SimpleData.TryGetValue(key, out serializedValue);
 
-            return defaultValue;
+            if (!found) return defaultValue;
+
+            try
+            {
+                return _serializer.Deserialize<T>(serializedValue);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Warning($"Failed to parse data for key '{key}': {e.Message}. Returning default value.");
+                return defaultValue;
+            }
         }
 
         /// <summary>
@@ -485,7 +679,7 @@ namespace ThanhDV.GameSaver.Core
                 return false;
             }
 
-            return _curSaveData.SimpleData.ContainsKey(key);
+            lock (_stateLock) return _curSaveData.SimpleData.ContainsKey(key);
         }
 
         /// <summary>
@@ -500,7 +694,7 @@ namespace ThanhDV.GameSaver.Core
                 return;
             }
 
-            _curSaveData.SimpleData.Remove(key);
+            lock (_stateLock) _curSaveData.SimpleData.Remove(key);
         }
 
         #endregion
@@ -514,7 +708,7 @@ namespace ThanhDV.GameSaver.Core
         /// <param name="savable">The newly observed object.</param>
         private void HandleRegistration(ISavable savable)
         {
-            RestoreSavable(savable);
+            lock (_stateLock) RestoreSavable(savable);
         }
 
         /// <summary>
@@ -524,7 +718,7 @@ namespace ThanhDV.GameSaver.Core
         /// <param name="savable">The object preparing to detach.</param>
         private void HandleUnregistration(ISavable savable)
         {
-            CaptureSavable(savable);
+            lock (_stateLock) CaptureSavable(savable);
         }
 
         /// <summary>
@@ -585,6 +779,40 @@ namespace ThanhDV.GameSaver.Core
             {
                 CaptureSavable(savable);
             }
+        }
+
+        /// <summary>
+        /// Tracks per-profile save state for concurrency control. Each profile being actively saved (or with pending save requests)
+        /// has one instance of this class. Access must be guarded by GameSaver._stateLock.
+        /// </summary>
+        private class ProfileSaveState
+        {
+            /// <summary>
+            /// True while a save pipeline is in flight for this profile.
+            /// </summary>
+            public bool IsRunning;
+
+            /// <summary>
+            /// True if the in-flight save was started by SaveImmediate (synchronous).
+            /// SaveAsync calls arriving while this is true are rejected (cannot coalesce into a sync run).
+            /// </summary>
+            public bool IsSaveImmediate;
+
+            /// <summary>
+            /// True if at least one additional SaveAsync call arrived while IsRunning was true.
+            /// The trailing save will run after the current pipeline completes.
+            /// </summary>
+            public bool IsDirty;
+
+            /// <summary>
+            /// Last-wins metadata supplied by coalesced SaveAsync calls. Applied by the trailing save.
+            /// </summary>
+            public ISaveMeta PendingMetadata;
+
+            /// <summary>
+            /// Handles of coalesced SaveAsync calls. All complete together when the trailing save finishes.
+            /// </summary>
+            public readonly List<GameSaverOperationInternal> PendingHandles = new();
         }
 
         #endregion

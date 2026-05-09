@@ -1,5 +1,5 @@
 {
-    "name": "ThanhDV.GameSaver.Helper",
+    "name": "ThanhDV.GameSaver.Common",
     "rootNamespace": "ThanhDV.GameSaver.Common",
     "references": [],
     "includePlatforms": [],

@@ -439,6 +439,322 @@ namespace ThanhDV.GameSaver.Tests.Editor
             Assert.That(savable.CaptureCallCount, Is.EqualTo(0));
         }
 
+        // ==============================================================================
+        // Concurrency tests — verify the dirty-flag + snapshot + per-profile state design.
+        // These tests use InMemoryStorageProvider.HoldWriteAsync() to freeze a save pipeline
+        // mid-flight, then issue more operations and observe coalesce / parallel / reject behaviors.
+        // ==============================================================================
+
+        [UnityTest]
+        public IEnumerator SaveAsync_SameProfile_Concurrent_CoalescesIntoTrailingSave()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-coalesce");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading pipeline did not reach WriteAsync");
+
+            // Issue 4 more saves while leading is blocked. All should coalesce into a single trailing save.
+            GameSaverOperationHandle h2 = _gameSaver.SaveAsync("profile-coalesce");
+            GameSaverOperationHandle h3 = _gameSaver.SaveAsync("profile-coalesce");
+            GameSaverOperationHandle h4 = _gameSaver.SaveAsync("profile-coalesce");
+            GameSaverOperationHandle h5 = _gameSaver.SaveAsync("profile-coalesce");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+            yield return WaitForOperation(h3);
+            yield return WaitForOperation(h4);
+            yield return WaitForOperation(h5);
+
+            Assert.That(h1.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h2.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h3.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h4.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h5.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+
+            int saveFileWrites = _storage.WriteAsyncCalls.Count(c => c.fileName == SaveFileName);
+            Assert.That(saveFileWrites, Is.LessThanOrEqualTo(2),
+                $"Expected at most 2 save writes (1 leading + 1 trailing), got {saveFileWrites}");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_TrailingUsesLatestState()
+        {
+            TestSaveData data = new() { Value = 1 };
+            _registry.Register(new TestSavable("player", data));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-trailing-state");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading pipeline did not reach WriteAsync");
+
+            // Mutate the captured value AFTER leading already serialized — trailing should pick up the new value.
+            data.Value = 99;
+            GameSaverOperationHandle h2 = _gameSaver.SaveAsync("profile-trailing-state");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+
+            SaveData lastSaveData = _serializer.GetLastSerializedObject<SaveData>();
+            Assert.That(lastSaveData, Is.Not.Null);
+            Assert.That(((TestSaveData)lastSaveData.DataModules["player"]).Value, Is.EqualTo(99),
+                "Trailing save should have captured the mutated value (99), not the leading's value (1).");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_DifferentProfile_RunsInParallel()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle hA = _gameSaver.SaveAsync("profile-A");
+            GameSaverOperationHandle hB = _gameSaver.SaveAsync("profile-B");
+
+            // Both pipelines should reach WriteAsync simultaneously — both blocked at the gate.
+            // If cross-profile parallelism is broken, only one would reach WriteAsync at a time.
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 2,
+                "both saves did not reach WriteAsync simultaneously (cross-profile parallelism broken)");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(hA);
+            yield return WaitForOperation(hB);
+
+            Assert.That(hA.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(hB.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(_storage.WriteAsyncCalls.Any(c => c.profileId == "profile-A" && c.fileName == SaveFileName), Is.True,
+                "profile-A save file should have been written.");
+            Assert.That(_storage.WriteAsyncCalls.Any(c => c.profileId == "profile-B" && c.fileName == SaveFileName), Is.True,
+                "profile-B save file should have been written.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_TrailingMetadata_LastWins()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            // Distinct ProfileID values let us tell which metas the pipeline mutated.
+            // The pipeline overwrites metadata.ProfileID = targetProfile during a save.
+            TestSaveMeta meta1 = new() { ProfileID = "initial-1" };
+            TestSaveMeta meta2 = new() { ProfileID = "initial-2" };
+            TestSaveMeta meta3 = new() { ProfileID = "initial-3" };
+
+            GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-meta", meta1);
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
+
+            // Two coalesced saves with different metadata. meta3 is the last — it should win.
+            GameSaverOperationHandle h2 = _gameSaver.SaveAsync("profile-meta", meta2);
+            GameSaverOperationHandle h3 = _gameSaver.SaveAsync("profile-meta", meta3);
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+            yield return WaitForOperation(h3);
+
+            Assert.That(meta1.ProfileID, Is.EqualTo("profile-meta"),
+                "meta1 should have been used by the leading pipeline (its ProfileID got rewritten).");
+            Assert.That(meta2.ProfileID, Is.EqualTo("initial-2"),
+                "meta2 should have been replaced by meta3 (last-wins) and never used by any pipeline.");
+            Assert.That(meta3.ProfileID, Is.EqualTo("profile-meta"),
+                "meta3 should have been used by the trailing pipeline.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_PendingHandles_CompleteOnlyAfterTrailing()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-pending");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
+
+            GameSaverOperationHandle h2 = _gameSaver.SaveAsync("profile-pending");
+            GameSaverOperationHandle h3 = _gameSaver.SaveAsync("profile-pending");
+
+            // Coalesced handles must NOT complete while their trailing save is still waiting at the gate.
+            Assert.That(h2.IsDone, Is.False, "Pending handle 2 should not complete before trailing save runs.");
+            Assert.That(h3.IsDone, Is.False, "Pending handle 3 should not complete before trailing save runs.");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+            yield return WaitForOperation(h3);
+
+            Assert.That(h1.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h2.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h3.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_ExplicitProfile_DoesNotChangeImplicitTarget()
+        {
+            // Setup: pre-populate profile-A and load it so _curProfileId = "profile-A".
+            SaveData stored = new();
+            stored.DataModules["player"] = new TestSaveData { Value = 1 };
+            string serialized = _serializer.RegisterSerializedValue(stored);
+            _storage.SetPrimaryFile("profile-A", SaveFileName, serialized);
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            yield return WaitForOperation(_gameSaver.LoadAsync("profile-A"));
+
+            // Explicit save to profile-B should NOT change which profile is "current".
+            GameSaverOperationHandle hExplicit = _gameSaver.SaveAsync("profile-B");
+            yield return WaitForOperation(hExplicit);
+
+            // Implicit save (null profile) should still target profile-A.
+            GameSaverOperationHandle hImplicit = _gameSaver.SaveAsync();
+            yield return WaitForOperation(hImplicit);
+
+            Assert.That(hImplicit.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+
+            (string profileId, string fileName, string data) lastSave = _storage.WriteAsyncCalls.Last(c => c.fileName == SaveFileName);
+            Assert.That(lastSave.profileId, Is.EqualTo("profile-A"),
+                "Implicit SaveAsync(null) should target the loaded profile (A), not the most recent explicit profile (B).");
+        }
+
+        [UnityTest]
+        public IEnumerator SetSimple_DuringSave_TrailingPersistsAllValues()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-setsimple");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
+
+            // Hammer SetSimple while the leading save is blocked at the gate.
+            // The lock around SimpleData mutations must prevent any "Collection was modified" exceptions
+            // when the trailing snapshot's Clone iterates the dictionary.
+            for (int i = 0; i < 100; i++)
+            {
+                _gameSaver.SetSimple($"key-{i}", i);
+            }
+
+            // Trigger trailing — its capture+snapshot should include all 100 SetSimple values.
+            GameSaverOperationHandle h2 = _gameSaver.SaveAsync("profile-setsimple");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+
+            Assert.That(h1.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(h2.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+
+            SaveData lastSaveData = _serializer.GetLastSerializedObject<SaveData>();
+            Assert.That(lastSaveData, Is.Not.Null);
+            for (int i = 0; i < 100; i++)
+            {
+                Assert.That(lastSaveData.SimpleData.ContainsKey($"key-{i}"), Is.True,
+                    $"Trailing save should contain key-{i} that was set during the leading save.");
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhileSavingSameProfile_CompletesFailed()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.DataModules["player"] = new TestSaveData { Value = 5 };
+            string serialized = _serializer.RegisterSerializedValue(stored);
+            _storage.SetPrimaryFile("profile-conflict", SaveFileName, serialized);
+
+            _storage.HoldWriteAsync();
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-conflict");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // Load same profile while save is in flight — must fail.
+            GameSaverOperationHandle loadHandle = _gameSaver.LoadAsync("profile-conflict");
+            yield return WaitForOperation(loadHandle);
+
+            Assert.That(loadHandle.Status, Is.EqualTo(GameSaverOperationStatus.Failed));
+            Assert.That(loadHandle.Error, Is.TypeOf<InvalidOperationException>());
+            Assert.That(loadHandle.Error.Message, Does.Contain("save operation is in flight"));
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhileSavingDifferentProfile_Succeeds()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.DataModules["player"] = new TestSaveData { Value = 7 };
+            string serialized = _serializer.RegisterSerializedValue(stored);
+            _storage.SetPrimaryFile("profile-load-target", SaveFileName, serialized);
+
+            _storage.HoldWriteAsync();
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-being-saved");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // Load a DIFFERENT profile — must succeed, no conflict.
+            GameSaverOperationHandle loadHandle = _gameSaver.LoadAsync("profile-load-target");
+            yield return WaitForOperation(loadHandle);
+
+            Assert.That(loadHandle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator SaveImmediate_WhileSaveAsyncSameProfile_Throws()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-conflict");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // Immediate save for the same profile must throw — cannot wait for async pipeline to drain.
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => _gameSaver.SaveImmediate("profile-conflict"));
+            Assert.That(ex.Message, Does.Contain("in flight"));
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator SaveImmediate_WhileSaveAsyncDifferentProfile_Succeeds()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-being-saved");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // SaveImmediate for a different profile must succeed — different state entry.
+            Assert.DoesNotThrow(() => _gameSaver.SaveImmediate("profile-different"));
+            Assert.That(_storage.WriteImmediateCalls.Any(c => c.profileId == "profile-different" && c.fileName == SaveFileName), Is.True);
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator DeleteProfile_WhileSavingSameProfile_Throws()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+            _storage.HoldWriteAsync();
+
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-conflict");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // Delete same profile while save is in flight — must throw.
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => _gameSaver.DeleteProfile("profile-conflict"));
+            Assert.That(ex.Message, Does.Contain("in flight"));
+
+            // Delete must NOT have happened.
+            Assert.That(_storage.DeleteProfileCalls, Is.Empty);
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(saveHandle);
+        }
+
         private static string SaveFileName => "slot.sav";
         private static string MetaFileName => "slot.meta";
 
@@ -496,6 +812,21 @@ namespace ThanhDV.GameSaver.Tests.Editor
             }
         }
 
+        private static IEnumerator WaitForCondition(Func<bool> predicate, string failureMessage, float timeoutSeconds = 2f)
+        {
+            float startTime = Time.realtimeSinceStartup;
+
+            while (!predicate())
+            {
+                if (Time.realtimeSinceStartup - startTime > timeoutSeconds)
+                {
+                    Assert.Fail($"Timed out after {timeoutSeconds}s waiting for: {failureMessage}");
+                }
+
+                yield return null;
+            }
+        }
+
         private sealed class InMemoryStorageProvider : IStorageProvider
         {
             private readonly Dictionary<(string profileId, string fileName), string> _primaryFiles = new();
@@ -513,21 +844,53 @@ namespace ThanhDV.GameSaver.Tests.Editor
             public List<string> ProfileIds { get; set; } = new();
             public string MostRecentProfileId { get; set; }
 
-            public Task WriteAsync(string profileId, string fileName, string data)
+            // Concurrency test infrastructure: a gate that holds WriteAsync calls until released.
+            // Use HoldWriteAsync/ReleaseWriteAsync to simulate slow disk I/O.
+            private readonly object _writeLock = new();
+            private TaskCompletionSource<bool> _writeAsyncGate;
+            private int _writeAsyncEnteredCount;
+
+            public int WriteAsyncEnteredCount => _writeAsyncEnteredCount;
+
+            /// <summary>
+            /// Starts holding all subsequent WriteAsync calls at a gate. Call ReleaseWriteAsync to let them proceed.
+            /// </summary>
+            public void HoldWriteAsync()
             {
+                _writeAsyncGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            /// <summary>
+            /// Releases all WriteAsync calls currently waiting at the gate, and stops holding new ones.
+            /// </summary>
+            public void ReleaseWriteAsync()
+            {
+                TaskCompletionSource<bool> gate = _writeAsyncGate;
+                _writeAsyncGate = null;
+                gate?.TrySetResult(true);
+            }
+
+            public async Task WriteAsync(string profileId, string fileName, string data)
+            {
+                System.Threading.Interlocked.Increment(ref _writeAsyncEnteredCount);
+
                 if (WriteAsyncException != null)
                 {
                     throw WriteAsyncException;
                 }
 
-                WriteAsyncCalls.Add((profileId, fileName, data));
-                _primaryFiles[(profileId, fileName)] = data;
-                if (!ProfileIds.Contains(profileId))
-                {
-                    ProfileIds.Add(profileId);
-                }
+                TaskCompletionSource<bool> gate = _writeAsyncGate;
+                if (gate != null) await gate.Task;
 
-                return Task.CompletedTask;
+                lock (_writeLock)
+                {
+                    WriteAsyncCalls.Add((profileId, fileName, data));
+                    _primaryFiles[(profileId, fileName)] = data;
+                    if (!ProfileIds.Contains(profileId))
+                    {
+                        ProfileIds.Add(profileId);
+                    }
+                }
             }
 
             public void WriteImmediate(string profileId, string fileName, string data)
@@ -616,6 +979,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
         private sealed class TrackingSerializer : ISerializer
         {
+            private readonly object _serializerLock = new();
             private readonly Dictionary<string, object> _serializedValues = new();
             private readonly Dictionary<string, Exception> _deserializeExceptions = new();
             private readonly List<object> _serializedObjects = new();
@@ -623,12 +987,16 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
             public string Serialize<T>(T obj)
             {
+                // CloneObject runs outside the lock — it's a pure function with no shared state.
                 object clone = CloneObject(obj);
-                _serializedObjects.Add(clone);
 
-                string key = $"serialized-{++_nextId}";
-                _serializedValues[key] = clone;
-                return key;
+                lock (_serializerLock)
+                {
+                    _serializedObjects.Add(clone);
+                    string key = $"serialized-{++_nextId}";
+                    _serializedValues[key] = clone;
+                    return key;
+                }
             }
 
             public T Deserialize<T>(string data)
@@ -638,7 +1006,11 @@ namespace ThanhDV.GameSaver.Tests.Editor
                     throw exception;
                 }
 
-                object value = _serializedValues[data];
+                object value;
+                lock (_serializerLock)
+                {
+                    value = _serializedValues[data];
+                }
                 return (T)CloneObject(value);
             }
 
