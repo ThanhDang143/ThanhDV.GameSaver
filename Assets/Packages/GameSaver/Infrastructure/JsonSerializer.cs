@@ -8,14 +8,31 @@ namespace ThanhDV.GameSaver.Infrastructure
     {
         private readonly JsonSerializerSettings _settings;
 
-        public JsonSerializer()
+        /// <summary>
+        /// Whitelist binder for manually registering types loaded after construction (AssetBundles, DLC, mods).
+        /// Register before serializing/deserializing those types.
+        /// </summary>
+        public SafeTypeBinder Binder { get; }
+
+        /// <summary>
+        /// Creates a serializer with a fresh <see cref="SafeTypeBinder"/> that auto-discovers
+        /// all <see cref="ISaveData"/> / <see cref="ISaveMeta"/> types in currently-loaded assemblies.
+        /// </summary>
+        public JsonSerializer() : this(new SafeTypeBinder()) { }
+
+
+
+        public JsonSerializer(SafeTypeBinder binder)
         {
+            Binder = binder ?? throw new ArgumentNullException(nameof(binder));
+
             _settings = new JsonSerializerSettings
             {
-                TypeNameHandling = TypeNameHandling.Auto,           // Supports polymorphism without bloating the JSON
-                ReferenceLoopHandling = ReferenceLoopHandling.Ignore, // Prevents crashes from circular object references
-                NullValueHandling = NullValueHandling.Ignore,         // Reduces file size by skipping null fields
-                Formatting = Formatting.None                        // Minifies JSON for faster I/O and smaller storage
+                TypeNameHandling = TypeNameHandling.Auto,               // Supports polymorphism without bloating the JSON
+                SerializationBinder = Binder,                           // Whitelist that blocks unsafe deserialization attacks
+                ReferenceLoopHandling = ReferenceLoopHandling.Ignore,   // Prevents crashes from circular object references
+                NullValueHandling = NullValueHandling.Ignore,           // Reduces file size by skipping null fields
+                Formatting = Formatting.None                            // Minifies JSON for faster I/O and smaller storage
             };
         }
 
