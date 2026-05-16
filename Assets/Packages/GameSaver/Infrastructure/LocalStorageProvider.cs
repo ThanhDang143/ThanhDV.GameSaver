@@ -283,7 +283,17 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// <returns>The combined full path.</returns>
         private string GetFullPath(string profileId, string fileName)
         {
-            return Path.Combine(_basePath, profileId, fileName);
+            string combined = Path.Combine(_basePath, profileId, fileName);
+            string resolved = Path.GetFullPath(combined);
+
+            string baseWithSeparator = Path.GetFullPath(_basePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (!resolved.StartsWith(baseWithSeparator, StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Resolved path '{resolved}' escapes base directory '{baseWithSeparator}'. profileId='{profileId}', fileName='{fileName}'.", nameof(fileName));
+            }
+
+            return resolved;
         }
 
         /// <summary>
@@ -299,18 +309,26 @@ namespace ThanhDV.GameSaver.Infrastructure
         }
 
         /// <summary>
-        /// Ensures that the Profile ID is a valid directory name, containing no prohibited characters or nested paths.
+        /// Validates that the profile ID is not null, empty, or whitespace, is not a reserved name,
+        /// and does not contain invalid characters or path separators.
         /// </summary>
-        /// <param name="profileId">The profile ID to validate.</param>
-        /// <exception cref="ArgumentException">Thrown when the profile ID contains invalid file name characters or directory separators.</exception>
+        /// <exception cref="ArgumentException">Thrown when profileId violates any of these constraints.</exception>
         private void ValidateProfileId(string profileId)
         {
-            if (string.IsNullOrEmpty(profileId)) return;
+            if (string.IsNullOrWhiteSpace(profileId))
+            {
+                throw new ArgumentException("ProfileId cannot be null, empty, or whitespace.", nameof(profileId));
+            }
+
+            if (profileId == "." || profileId == "..")
+            {
+                throw new ArgumentException($"ProfileId '{profileId}' is reserved — cannot use '.' or '..'.", nameof(profileId));
+            }
 
             // Check for characters prohibited by the OS and directory separator slashes (/, \)
             if (profileId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || profileId.Contains(Path.DirectorySeparatorChar) || profileId.Contains(Path.AltDirectorySeparatorChar))
             {
-                throw new ArgumentException($"ProfileId '{profileId}' is invalid. The system does not support nested directories or special characters.", nameof(profileId));
+                throw new ArgumentException($"ProfileId '{profileId}' is invalid. Nested directories and special characters are not allowed.", nameof(profileId));
             }
         }
 

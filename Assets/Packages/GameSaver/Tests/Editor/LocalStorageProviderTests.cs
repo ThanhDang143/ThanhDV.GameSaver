@@ -319,5 +319,119 @@ namespace ThanhDV.GameSaver.Tests
         }
 
         #endregion Profile Management Tests
+
+        #region Path security (#12)
+
+        // -----------------------------------------------------------------
+        // Validation strict — null/empty/whitespace/reserved names
+        // -----------------------------------------------------------------
+
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase(" ")]
+        [TestCase("   ")]
+        [TestCase("\t")]
+        public void Validation_NullEmptyOrWhitespaceProfileId_Throws(string invalidId)
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.WriteImmediate(invalidId, "save.dat", "data"),
+                "ProfileId null/empty/whitespace phải reject.");
+        }
+
+        [TestCase(".")]
+        [TestCase("..")]
+        public void Validation_ReservedProfileId_Throws(string reserved)
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.WriteImmediate(reserved, "save.dat", "data"),
+                $"ProfileId '{reserved}' là reserved name, phải reject để chống path traversal.");
+        }
+
+        [Test]
+        public void Validation_DoubleDot_RejectedAcrossAllReadWriteEntryPoints()
+        {
+            // Đảm bảo cả các entry point Read cũng reject '..' — chống vector audit gốc nêu.
+            Assert.Throws<System.ArgumentException>(() => _provider.WriteImmediate("..", "save.dat", "data"));
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.WriteAsync("..", "save.dat", "data")).GetAwaiter().GetResult());
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.ReadAsync("..", "save.dat")).GetAwaiter().GetResult());
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.ReadBackupAsync("..", "save.dat")).GetAwaiter().GetResult());
+            Assert.Throws<System.ArgumentException>(() => _provider.Exists("..", "save.dat"));
+            Assert.Throws<System.ArgumentException>(() => _provider.DeleteProfile(".."));
+        }
+
+        // -----------------------------------------------------------------
+        // Containment check — fileName traversal (vector audit không tracked)
+        // -----------------------------------------------------------------
+
+        [Test]
+        public void Containment_FilenameWithParentTraversal_OnWriteImmediate_Throws()
+        {
+            // ValidateProfileId không bắt vì traversal ở fileName, không phải profileId.
+            // Containment check sau Path.GetFullPath phải catch.
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.WriteImmediate("valid-profile", "../../escape.txt", "data"));
+        }
+
+        [Test]
+        public void Containment_FilenameWithParentTraversal_OnWriteAsync_Throws()
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.WriteAsync("valid-profile", "../../escape.txt", "data"))
+                    .GetAwaiter().GetResult());
+        }
+
+        [Test]
+        public void Containment_FilenameWithParentTraversal_OnReadAsync_Throws()
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.ReadAsync("valid-profile", "../../etc/passwd"))
+                    .GetAwaiter().GetResult());
+        }
+
+        [Test]
+        public void Containment_FilenameWithParentTraversal_OnReadBackupAsync_Throws()
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                Task.Run(() => _provider.ReadBackupAsync("valid-profile", "../../etc/passwd"))
+                    .GetAwaiter().GetResult());
+        }
+
+        [Test]
+        public void Containment_FilenameAsAbsolutePath_Throws()
+        {
+            // Path.Combine(base, "validprofile", "/tmp/x") = "/tmp/x" — Path.Combine drop earlier parts
+            // khi gặp absolute path. Containment check phát hiện vì /tmp/x không nằm trong base.
+            string absolutePath = Path.Combine(Path.GetTempPath(), "absolute_escape.txt");
+
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.WriteImmediate("valid-profile", absolutePath, "data"));
+        }
+
+        [Test]
+        public void Containment_FilenameInExistsCheck_Throws()
+        {
+            Assert.Throws<System.ArgumentException>(() =>
+                _provider.Exists("valid-profile", "../../escape.txt"));
+        }
+
+        // -----------------------------------------------------------------
+        // Sanity — valid inputs không throw sau khi siết validation
+        // -----------------------------------------------------------------
+
+        [Test]
+        public void ValidationAndContainment_NormalCase_PassesThrough()
+        {
+            // Đảm bảo strict validation không phá hành vi bình thường.
+            Assert.DoesNotThrow(() => _provider.WriteImmediate("normal-profile", "save.json", "data"));
+            Assert.DoesNotThrow(() => _provider.Exists("normal-profile", "save.json"));
+            Assert.DoesNotThrow(() =>
+                Task.Run(() => _provider.ReadAsync("normal-profile", "save.json"))
+                    .GetAwaiter().GetResult());
+        }
+
+        #endregion Path security
     }
 }
