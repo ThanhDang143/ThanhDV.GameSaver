@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Newtonsoft.Json;
 using ThanhDV.GameSaver.Core;
 
@@ -20,8 +21,6 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// </summary>
         public JsonSerializer() : this(new SafeTypeBinder()) { }
 
-
-
         public JsonSerializer(SafeTypeBinder binder)
         {
             Binder = binder ?? throw new ArgumentNullException(nameof(binder));
@@ -32,7 +31,8 @@ namespace ThanhDV.GameSaver.Infrastructure
                 SerializationBinder = Binder,                           // Whitelist that blocks unsafe deserialization attacks
                 ReferenceLoopHandling = ReferenceLoopHandling.Ignore,   // Prevents crashes from circular object references
                 NullValueHandling = NullValueHandling.Ignore,           // Reduces file size by skipping null fields
-                Formatting = Formatting.None                            // Minifies JSON for faster I/O and smaller storage
+                Formatting = Formatting.None,                           // Minifies JSON for faster I/O and smaller storage
+                Converters = new List<JsonConverter>(JsonUtilities.UnityConverter)  // Unity-aware converters: handles Vector*, Quaternion, Color, Rect, Bounds, etc.
             };
         }
 

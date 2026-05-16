@@ -755,6 +755,163 @@ namespace ThanhDV.GameSaver.Tests.Editor
             yield return WaitForOperation(saveHandle);
         }
 
+        // ==============================================================================
+        // App lifecycle & auto-save tests (Cluster #4)
+        // Cover WaitForPendingOperationsAsync, OnSaveCompleted event, auto-save countdown
+        // logic, and tick-driven saves. Lifecycle event hooks (Application.quitting /
+        // focusChanged) are not directly tested — they invoke PerformAutoSaveFlush which
+        // is exercised indirectly through WaitForPendingOperationsAsync + SaveImmediate.
+        // ==============================================================================
+
+        [UnityTest]
+        public IEnumerator WaitForPendingOperationsAsync_NoSaveInFlight_CompletesImmediately()
+        {
+            Task waitTask = _gameSaver.WaitForPendingOperationsAsync();
+            yield return WaitForCondition(() => waitTask.IsCompleted, "WaitForPendingOperationsAsync did not complete when no saves were running.");
+            Assert.IsTrue(waitTask.IsCompletedSuccessfully);
+        }
+
+        [UnityTest]
+        public IEnumerator WaitForPendingOperationsAsync_PendingSave_AwaitsCompletion()
+        {
+            _storage.HoldWriteAsync();
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-wait");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            Task waitTask = _gameSaver.WaitForPendingOperationsAsync();
+            yield return null; // give the wait task a chance to enter Task.WhenAll
+
+            Assert.IsFalse(waitTask.IsCompleted, "Wait should still be pending while the save is blocked at the storage gate.");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForCondition(() => waitTask.IsCompleted, "Wait did not complete after the storage gate was released.");
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator WaitForPendingOperationsAsync_MultipleProfiles_AwaitsAll()
+        {
+            _storage.HoldWriteAsync();
+            GameSaverOperationHandle hA = _gameSaver.SaveAsync("profile-wait-A");
+            GameSaverOperationHandle hB = _gameSaver.SaveAsync("profile-wait-B");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 2, "both saves did not reach WriteAsync simultaneously");
+
+            Task waitTask = _gameSaver.WaitForPendingOperationsAsync();
+            yield return null;
+            Assert.IsFalse(waitTask.IsCompleted, "Wait should still be pending with two saves held at the gate.");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForCondition(() => waitTask.IsCompleted, "Wait did not complete after releasing both saves.");
+            yield return WaitForOperation(hA);
+            yield return WaitForOperation(hB);
+        }
+
+        [Test]
+        public void OnSaveCompleted_FiresWithProfileId_AfterSaveImmediate()
+        {
+            string captured = null;
+            _gameSaver.OnSaveCompleted += id => captured = id;
+
+            _gameSaver.SaveImmediate("profile-event-sync");
+
+            Assert.AreEqual("profile-event-sync", captured, "OnSaveCompleted should fire with the saved profile ID.");
+        }
+
+        [UnityTest]
+        public IEnumerator OnSaveCompleted_FiresWithProfileId_AfterSaveAsync()
+        {
+            string captured = null;
+            _gameSaver.OnSaveCompleted += id => captured = id;
+
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-event-async");
+            yield return WaitForOperation(handle);
+
+            // The event is marshaled back to the captured SynchronizationContext — give it a frame to deliver.
+            yield return WaitForCondition(() => captured != null, "OnSaveCompleted did not fire after SaveAsync completed.");
+            Assert.AreEqual("profile-event-async", captured);
+        }
+
+        [Test]
+        public void AutoSaveCountdown_Resets_WhenSaveImmediateMatchesCurrentProfile()
+        {
+            SetPrivateField(_gameSaver, "_curProfileId", "profile-current");
+            SetPrivateField(_gameSaver, "_autoSaveCountdown", 42f);
+
+            _gameSaver.SaveImmediate("profile-current");
+
+            float countdownAfter = GetPrivateField<float>(_gameSaver, "_autoSaveCountdown");
+            Assert.That(countdownAfter, Is.EqualTo(_settings.AutoSaveTime).Within(0.01f),
+                "Countdown should be reset to AutoSaveTime when the save target matches the current profile.");
+        }
+
+        [Test]
+        public void AutoSaveCountdown_DoesNotReset_WhenSaveImmediateDifferentProfile()
+        {
+            SetPrivateField(_gameSaver, "_curProfileId", "profile-A");
+            SetPrivateField(_gameSaver, "_autoSaveCountdown", 42f);
+
+            _gameSaver.SaveImmediate("profile-B");
+
+            float countdownAfter = GetPrivateField<float>(_gameSaver, "_autoSaveCountdown");
+            Assert.That(countdownAfter, Is.EqualTo(42f).Within(0.01f),
+                "Countdown must NOT reset when an explicit save targets a different profile.");
+        }
+
+        [Test]
+        public void AutoSaveTick_AutoSaveDisabled_DoesNotTriggerSave()
+        {
+            SetPrivateField(_settings, "_enableAutoSave", false);
+            SetPrivateField(_gameSaver, "_curProfileId", "profile-disabled");
+            SetPrivateField(_gameSaver, "_autoSaveCountdown", 0.1f);
+
+            int writesBefore = _storage.WriteAsyncEnteredCount;
+            InvokeAutoSaveTick(_gameSaver, 100f);
+
+            Assert.AreEqual(writesBefore, _storage.WriteAsyncEnteredCount, "AutoSaveTick must not trigger a save when EnableAutoSave is false.");
+        }
+
+        [Test]
+        public void AutoSaveTick_NoCurrentProfile_DoesNotTriggerSave()
+        {
+            SetPrivateField(_settings, "_enableAutoSave", true);
+            SetPrivateField<string>(_gameSaver, "_curProfileId", null);
+            SetPrivateField(_gameSaver, "_autoSaveCountdown", 0.1f);
+
+            int writesBefore = _storage.WriteAsyncEnteredCount;
+            InvokeAutoSaveTick(_gameSaver, 100f);
+
+            Assert.AreEqual(writesBefore, _storage.WriteAsyncEnteredCount, "AutoSaveTick must not trigger a save when no profile is loaded.");
+        }
+
+        [UnityTest]
+        public IEnumerator AutoSaveTick_CountdownReached_TriggersImplicitSave()
+        {
+            SetPrivateField(_settings, "_enableAutoSave", true);
+            SetPrivateField(_settings, "_autoSaveTime", 1f);
+            SetPrivateField(_gameSaver, "_curProfileId", "profile-tick");
+            SetPrivateField(_gameSaver, "_autoSaveCountdown", 0.1f);
+
+            int writesBefore = _storage.WriteAsyncEnteredCount;
+            InvokeAutoSaveTick(_gameSaver, 1f);
+
+            yield return WaitForCondition(
+                () => _storage.WriteAsyncEnteredCount > writesBefore,
+                "AutoSaveTick should have triggered SaveAsync once the countdown reached zero.");
+        }
+
+        [Test]
+        public void Dispose_UnsubscribesFromAutoSaveTicker_AndApplicationEvents()
+        {
+            // No direct introspection of static Application event lists is available in C#,
+            // so this test asserts at least that Dispose runs idempotently without throwing
+            // and that a second Dispose (after disposal) doesn't blow up.
+            Assert.DoesNotThrow(() => _gameSaver.Dispose());
+            Assert.DoesNotThrow(() => _gameSaver.Dispose(), "Dispose must be safe to call twice.");
+
+            // Prevent TearDown from disposing again on the already-disposed instance.
+            _gameSaver = null;
+        }
+
         private static string SaveFileName => "slot.sav";
         private static string MetaFileName => "slot.meta";
 
@@ -780,6 +937,18 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             field.SetValue(target, value);
+        }
+
+        private static T GetPrivateField<T>(object target, string fieldName)
+        {
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            return (T)field.GetValue(target);
+        }
+
+        private static void InvokeAutoSaveTick(GameSaverRuntime gameSaver, float deltaTime)
+        {
+            MethodInfo method = typeof(GameSaverRuntime).GetMethod("AutoSaveTick", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Invoke(gameSaver, new object[] { deltaTime });
         }
 
         private static IEnumerator WaitForOperation(GameSaverOperationHandle handle, float timeoutSeconds = 1f)

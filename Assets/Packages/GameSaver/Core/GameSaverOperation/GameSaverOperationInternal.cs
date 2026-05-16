@@ -1,11 +1,14 @@
 using System;
+using System.Threading;
 
 namespace ThanhDV.GameSaver.Core
 {
     public enum GameSaverOperationStatus { Pending, Succeeded, Failed }
 
     /// <summary>
-    /// Internal core class that tracks the state, progress, and callbacks of a typeless GameSaver asynchronous operation.
+    /// Tracks state, progress, and callbacks for typeless async operations.
+    /// Captures the SynchronizationContext to marshal callbacks back to their origin (typically Unity main thread),
+    /// ensuring callback code safely accesses Unity APIs even when running on threadpool.
     /// </summary>
     internal class GameSaverOperationInternal
     {
@@ -13,12 +16,12 @@ namespace ThanhDV.GameSaver.Core
         /// Current status of the operation.
         /// </summary>
         public GameSaverOperationStatus Status { get; set; } = GameSaverOperationStatus.Pending;
-        
+
         /// <summary>
         /// Progress of the operation, ranging from 0.0 to 1.0.
         /// </summary>
         public float PercentComplete { get; set; } = 0f;
-        
+
         /// <summary>
         /// The exception that caused the operation to fail, if any.
         /// </summary>
@@ -33,12 +36,19 @@ namespace ThanhDV.GameSaver.Core
         /// Event triggered when the operation completes. Passes a public handle to the listener.
         /// </summary>
         public event Action<GameSaverOperationHandle> Completed;
-        
+
         /// <summary>
         /// Action invoked by the C# async state machine to continue execution after an await.
         /// Used internally by GameSaverAwaiter.
         /// </summary>
         public event Action ContinuationAction;
+
+        private readonly SynchronizationContext _capturedContext;
+
+        public GameSaverOperationInternal()
+        {
+            _capturedContext = SynchronizationContext.Current;
+        }
 
         /// <summary>
         /// Finalizes the operation, updating its state and triggering all pending callbacks.
@@ -50,6 +60,18 @@ namespace ThanhDV.GameSaver.Core
             Status = error == null ? GameSaverOperationStatus.Succeeded : GameSaverOperationStatus.Failed;
             PercentComplete = 1f;
 
+            if (_capturedContext != null && _capturedContext != SynchronizationContext.Current)
+            {
+                _capturedContext.Post(_ => InvokeCallbacks(), null);
+            }
+            else
+            {
+                InvokeCallbacks();
+            }
+        }
+
+        private void InvokeCallbacks()
+        {
             Completed?.Invoke(new GameSaverOperationHandle(this));
             ContinuationAction?.Invoke();
 
@@ -60,7 +82,9 @@ namespace ThanhDV.GameSaver.Core
     }
 
     /// <summary>
-    /// Internal core class that tracks the state, progress, and callbacks of a typed GameSaver asynchronous operation.
+    /// Tracks state, progress, and callbacks for typed async operations.
+    /// Captures the SynchronizationContext to marshal callbacks back to their origin (typically Unity main thread),
+    /// ensuring callback code safely accesses Unity APIs even when running on threadpool.
     /// </summary>
     /// <typeparam name="T">The result type of the operation.</typeparam>
     internal class GameSaverOperationInternal<T>
@@ -69,17 +93,17 @@ namespace ThanhDV.GameSaver.Core
         /// Current status of the operation.
         /// </summary>
         public GameSaverOperationStatus Status { get; set; } = GameSaverOperationStatus.Pending;
-        
+
         /// <summary>
         /// Progress of the operation, ranging from 0.0 to 1.0.
         /// </summary>
         public float PercentComplete { get; set; } = 0f;
-        
+
         /// <summary>
         /// The exception that caused the operation to fail, if any.
         /// </summary>
         public Exception Error { get; set; }
-        
+
         /// <summary>
         /// The result of the operation upon successful completion.
         /// </summary>
@@ -94,11 +118,18 @@ namespace ThanhDV.GameSaver.Core
         /// Event triggered when the operation completes. Passes a public handle to the listener.
         /// </summary>
         public event Action<GameSaverOperationHandle<T>> Completed;
-        
+
         /// <summary>
         /// Action invoked by the C# async state machine to continue execution after an await.
         /// </summary>
         public event Action ContinuationAction;
+
+        private readonly SynchronizationContext _capturedContext;
+
+        public GameSaverOperationInternal()
+        {
+            _capturedContext = SynchronizationContext.Current;
+        }
 
         /// <summary>
         /// Finalizes the operation, sets the result, and triggers all pending callbacks.
@@ -112,6 +143,18 @@ namespace ThanhDV.GameSaver.Core
             Status = error == null ? GameSaverOperationStatus.Succeeded : GameSaverOperationStatus.Failed;
             PercentComplete = 1f;
 
+            if (_capturedContext != null && _capturedContext != SynchronizationContext.Current)
+            {
+                _capturedContext.Post(_ => InvokeCallbacks(), null);
+            }
+            else
+            {
+                InvokeCallbacks();
+            }
+        }
+
+        private void InvokeCallbacks()
+        {
             Completed?.Invoke(new GameSaverOperationHandle<T>(this));
             ContinuationAction?.Invoke();
 

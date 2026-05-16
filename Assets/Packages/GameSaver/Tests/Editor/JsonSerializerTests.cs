@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 using NUnit.Framework;
 using ThanhDV.GameSaver.Core;
+using UnityEngine;
 
 namespace ThanhDV.GameSaver.Tests.Editor
 {
@@ -262,6 +263,180 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
         #endregion
 
+        #region Unity-type converters
+
+        [Test]
+        public void Vector2_RoundTrip_PreservesValues()
+        {
+            Vector2 original = new(1.5f, -2.5f);
+            string json = _serializer.Serialize(original);
+            Vector2 result = _serializer.Deserialize<Vector2>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Vector3_RoundTrip_PreservesValues()
+        {
+            Vector3 original = new(1.5f, -2.0f, 3.7f);
+            string json = _serializer.Serialize(original);
+            Vector3 result = _serializer.Deserialize<Vector3>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Vector3_Serialize_OmitsDerivedProperties()
+        {
+            // Without the converter, Newtonsoft would emit normalized, magnitude, sqrMagnitude
+            // (causing stack overflow or massive bloat). The converter must strip those.
+            string json = _serializer.Serialize(Vector3.up);
+
+            Assert.IsFalse(json.Contains("magnitude"), $"Output should not include derived property 'magnitude'. JSON: {json}");
+            Assert.IsFalse(json.Contains("normalized"), $"Output should not include derived property 'normalized'. JSON: {json}");
+            Assert.IsFalse(json.Contains("sqrMagnitude"), $"Output should not include derived property 'sqrMagnitude'. JSON: {json}");
+        }
+
+        [Test]
+        public void Vector4_RoundTrip_PreservesValues()
+        {
+            Vector4 original = new(1f, 2f, 3f, 4f);
+            string json = _serializer.Serialize(original);
+            Vector4 result = _serializer.Deserialize<Vector4>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Vector2Int_RoundTrip_PreservesValues()
+        {
+            Vector2Int original = new(-5, 12);
+            string json = _serializer.Serialize(original);
+            Vector2Int result = _serializer.Deserialize<Vector2Int>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Vector3Int_RoundTrip_PreservesValues()
+        {
+            Vector3Int original = new(100, -200, 300);
+            string json = _serializer.Serialize(original);
+            Vector3Int result = _serializer.Deserialize<Vector3Int>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Quaternion_RoundTrip_PreservesValues()
+        {
+            // Use a non-identity rotation so the round-trip catches any incorrect normalization.
+            Quaternion original = Quaternion.Euler(30f, 45f, 60f);
+            string json = _serializer.Serialize(original);
+            Quaternion result = _serializer.Deserialize<Quaternion>(json);
+
+            // Float comparison with tolerance to handle minor precision drift.
+            Assert.AreEqual(original.x, result.x, 1e-5f);
+            Assert.AreEqual(original.y, result.y, 1e-5f);
+            Assert.AreEqual(original.z, result.z, 1e-5f);
+            Assert.AreEqual(original.w, result.w, 1e-5f);
+        }
+
+        [Test]
+        public void Quaternion_Serialize_OmitsEulerAngles()
+        {
+            // eulerAngles is a property that recomputes from x/y/z/w — including it would bloat output
+            // and round-tripping through it loses precision (gimbal lock).
+            string json = _serializer.Serialize(Quaternion.Euler(10f, 20f, 30f));
+            Assert.IsFalse(json.Contains("eulerAngles"), $"Output should not include eulerAngles property. JSON: {json}");
+        }
+
+        [Test]
+        public void Color_RoundTrip_PreservesValues()
+        {
+            Color original = new(0.25f, 0.5f, 0.75f, 1f);
+            string json = _serializer.Serialize(original);
+            Color result = _serializer.Deserialize<Color>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Color32_RoundTrip_PreservesValues()
+        {
+            Color32 original = new(64, 128, 192, 255);
+            string json = _serializer.Serialize(original);
+            Color32 result = _serializer.Deserialize<Color32>(json);
+            Assert.AreEqual(original.r, result.r);
+            Assert.AreEqual(original.g, result.g);
+            Assert.AreEqual(original.b, result.b);
+            Assert.AreEqual(original.a, result.a);
+        }
+
+        [Test]
+        public void Rect_RoundTrip_PreservesValues()
+        {
+            Rect original = new(10f, 20f, 100f, 50f);
+            string json = _serializer.Serialize(original);
+            Rect result = _serializer.Deserialize<Rect>(json);
+            Assert.AreEqual(original, result);
+        }
+
+        [Test]
+        public void Bounds_RoundTrip_PreservesValues()
+        {
+            Bounds original = new(new Vector3(1f, 2f, 3f), new Vector3(10f, 20f, 30f));
+            string json = _serializer.Serialize(original);
+            Bounds result = _serializer.Deserialize<Bounds>(json);
+            Assert.AreEqual(original.center, result.center);
+            Assert.AreEqual(original.size, result.size);
+        }
+
+        [Test]
+        public void LayerMask_RoundTrip_PreservesValues()
+        {
+            LayerMask original = (1 << 8) | (1 << 12) | (1 << 31);
+            string json = _serializer.Serialize(original);
+            LayerMask result = _serializer.Deserialize<LayerMask>(json);
+            Assert.AreEqual(original.value, result.value);
+        }
+
+        [Test]
+        public void Matrix4x4_RoundTrip_PreservesValues()
+        {
+            Matrix4x4 original = Matrix4x4.TRS(
+                new Vector3(1f, 2f, 3f),
+                Quaternion.Euler(30f, 60f, 90f),
+                new Vector3(2f, 2f, 2f));
+
+            string json = _serializer.Serialize(original);
+            Matrix4x4 result = _serializer.Deserialize<Matrix4x4>(json);
+
+            for (int row = 0; row < 4; row++)
+            {
+                for (int col = 0; col < 4; col++)
+                {
+                    Assert.AreEqual(original[row, col], result[row, col], 1e-5f, $"Mismatch at [{row},{col}]");
+                }
+            }
+        }
+
+        [Test]
+        public void UnityTypes_NestedInSaveData_RoundTripsCorrectly()
+        {
+            // Most realistic scenario: Unity types as fields inside a save data class.
+            UnitTransform original = new()
+            {
+                Position = new Vector3(1f, 2f, 3f),
+                Rotation = Quaternion.Euler(0f, 90f, 0f),
+                Color = Color.green
+            };
+
+            string json = _serializer.Serialize(original);
+            UnitTransform result = _serializer.Deserialize<UnitTransform>(json);
+
+            Assert.AreEqual(original.Position, result.Position);
+            Assert.AreEqual(original.Rotation.x, result.Rotation.x, 1e-5f);
+            Assert.AreEqual(original.Rotation.w, result.Rotation.w, 1e-5f);
+            Assert.AreEqual(original.Color, result.Color);
+        }
+
+        #endregion
+
         #region Test types
 
         private class TestData
@@ -298,6 +473,13 @@ namespace ThanhDV.GameSaver.Tests.Editor
             public string Name { get; set; }
             public Node Parent { get; set; }
             public Node Child { get; set; }
+        }
+
+        private class UnitTransform
+        {
+            public Vector3 Position;
+            public Quaternion Rotation;
+            public Color Color;
         }
 
         #endregion

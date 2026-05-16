@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using ThanhDV.GameSaver.Common;
+using UnityEngine;
 
 namespace ThanhDV.GameSaver.Core
 {
@@ -17,6 +19,19 @@ namespace ThanhDV.GameSaver.Core
 
         private SaveData _curSaveData = new();
         private string _curProfileId;
+        private float _autoSaveCountdown;
+
+        /// <summary>
+        /// Caller's SynchronizationContext captured at construction. Used to marshal OnSaveCompleted
+        /// invocations and the auto-save countdown reset back to the original thread (typically Unity main thread).
+        /// </summary>
+        private readonly SynchronizationContext _capturedContext;
+
+        /// <summary>
+        /// Raised after every successful save (async or immediate) with the profile ID that was saved.
+        /// Always fires on the thread where this GameSaver was constructed — safe for Unity API calls.
+        /// </summary>
+        public event Action<string> OnSaveCompleted;
 
         private string MetaName => _settings.FileName + _settings.MetaExtension;
         private string SaveName => _settings.FileName + _settings.SaveExtension;
@@ -45,9 +60,16 @@ namespace ThanhDV.GameSaver.Core
             _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
             _encryptionProvider = encryptionProvider ?? throw new ArgumentNullException(nameof(encryptionProvider));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _capturedContext = SynchronizationContext.Current;
 
             _registry.OnSavableRegistered += HandleRegistration;
             _registry.OnSavableUnregistered += HandleUnregistration;
+
+            Application.quitting += HandleApplicationQuitting;
+            Application.focusChanged += HandleFocusChanged;
+
+            ResetAutoSaveCountdown();
+            AutoSaveTicker.Subscribe(this);
         }
 
         #region Profile Management
@@ -144,7 +166,6 @@ namespace ThanhDV.GameSaver.Core
                 return new GameSaverOperationHandle(internalOp);
             }
 
-            bool startImmediate;
             bool rejectedBySaveImmediate = false;
             lock (_stateLock)
             {
@@ -160,7 +181,6 @@ namespace ThanhDV.GameSaver.Core
                     {
                         // A SaveImmediate is in flight — cannot coalesce into a synchronous run.
                         rejectedBySaveImmediate = true;
-                        startImmediate = false;
                     }
                     else
                     {
@@ -168,14 +188,12 @@ namespace ThanhDV.GameSaver.Core
                         saveState.IsDirty = true;
                         if (metadata != null) saveState.PendingMetadata = metadata;
                         saveState.PendingHandles.Add(internalOp);
-                        startImmediate = false;
                     }
                 }
                 else
                 {
                     // No save in flight — claim the slot and start the leading pipeline.
-                    saveState.IsRunning = true;
-                    startImmediate = true;
+                    saveState.RunningTask = ProcessSaveAsync(targetProfile, isImplicit, metadata, internalOp);
                 }
             }
 
@@ -183,10 +201,6 @@ namespace ThanhDV.GameSaver.Core
             {
                 InvalidOperationException error = new($"Cannot SaveAsync for profile '{targetProfile}' while a SaveImmediate is in flight.");
                 internalOp.Complete(error);
-            }
-            else if (startImmediate)
-            {
-                _ = ProcessSaveAsync(targetProfile, isImplicit, metadata, internalOp);
             }
 
             return new GameSaverOperationHandle(internalOp);
@@ -217,7 +231,6 @@ namespace ThanhDV.GameSaver.Core
                 }
 
                 ProfileSaveState saveState = existingSaveState ?? new();
-                saveState.IsRunning = true;
                 saveState.IsSaveImmediate = true;
                 _saveStates[targetProfile] = saveState;
 
@@ -243,6 +256,8 @@ namespace ThanhDV.GameSaver.Core
 
                 if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
 
+                NotifySaveCompleted(targetProfile);
+
                 DebugLog.Success("Immediate save operation successful!");
             }
             catch (Exception e)
@@ -258,7 +273,6 @@ namespace ThanhDV.GameSaver.Core
                 {
                     if (_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState))
                     {
-                        saveState.IsRunning = false;
                         saveState.IsSaveImmediate = false;
 
                         if (!saveState.IsDirty && saveState.PendingHandles.Count == 0)
@@ -354,7 +368,7 @@ namespace ThanhDV.GameSaver.Core
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         private async Task ProcessSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, GameSaverOperationInternal internalOp)
         {
-            await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, internalOp);
+            await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, internalOp).ConfigureAwait(false);
 
             // Trailing loop: drain coalesced SaveAsync calls.
             int iterations = 0;
@@ -369,7 +383,7 @@ namespace ThanhDV.GameSaver.Core
 
                     if (!saveState.IsDirty)
                     {
-                        saveState.IsRunning = false;
+                        saveState.RunningTask = null;
                         _saveStates.Remove(targetProfile);
                         return;
                     }
@@ -390,7 +404,7 @@ namespace ThanhDV.GameSaver.Core
                 // Trailing pipeline is never "implicit" — it always targets the resolved profile explicitly.
                 // The leading pipeline already updated _curProfileId if needed.
                 GameSaverOperationInternal trailingOp = new();
-                await ProcessSingleSaveAsync(targetProfile, false, trailingMetatdata, trailingOp);
+                await ProcessSingleSaveAsync(targetProfile, false, trailingMetatdata, trailingOp).ConfigureAwait(false);
 
                 for (int i = 0; i < pendingOps.Length; i++)
                 {
@@ -427,10 +441,10 @@ namespace ThanhDV.GameSaver.Core
                 {
                     string data = _serializer.Serialize(snapshot);
                     return _settings.UseEncryption ? _encryptionProvider.Encrypt(data) : data;
-                });
+                }).ConfigureAwait(false);
                 internalOp.PercentComplete = 0.5f;
 
-                await _storageProvider.WriteAsync(targetProfile, SaveName, finalData);
+                await _storageProvider.WriteAsync(targetProfile, SaveName, finalData).ConfigureAwait(false);
 
                 internalOp.PercentComplete = 0.8f;
                 if (metadata != null)
@@ -438,11 +452,13 @@ namespace ThanhDV.GameSaver.Core
                     metadata.ProfileID = targetProfile;
                     metadata.LastTimeSaved = DateTime.UtcNow;
 
-                    string metaJson = await Task.Run(() => _serializer.Serialize(metadata));
-                    await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson);
+                    string metaJson = await Task.Run(() => _serializer.Serialize(metadata)).ConfigureAwait(false);
+                    await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson).ConfigureAwait(false);
                 }
 
                 if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
+
+                NotifySaveCompleted(targetProfile);
 
                 internalOp.PercentComplete = 1f;
                 internalOp.Complete();
@@ -609,6 +625,35 @@ namespace ThanhDV.GameSaver.Core
             }
         }
 
+        /// <summary>
+        /// Awaits all pending async save pipelines, looping to catch new SaveAsync calls.
+        /// Use before scene transitions or before SaveImmediate.
+        /// Does not interact with sync saves or rethrow errors (routed to individual handles).
+        /// </summary>
+        public async Task WaitForPendingOperationsAsync()
+        {
+            while (true)
+            {
+                Task[] runningTasks;
+                lock (_stateLock)
+                {
+                    runningTasks = _saveStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
+                }
+
+                if (runningTasks.Length <= 0) return;
+
+                try
+                {
+                    await Task.WhenAll(runningTasks).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Errors already routed to individual operation handles.
+                    // This method only awaits completion, not success/failure of each save.
+                }
+            }
+        }
+
         #endregion
 
         #region Direct Access
@@ -728,11 +773,84 @@ namespace ThanhDV.GameSaver.Core
         {
             _registry.OnSavableRegistered -= HandleRegistration;
             _registry.OnSavableUnregistered -= HandleUnregistration;
+
+            Application.quitting -= HandleApplicationQuitting;
+            Application.focusChanged -= HandleFocusChanged;
+
+            AutoSaveTicker.Unsubscribe(this);
         }
 
         #endregion
 
         #region Helper
+
+        /// <summary>
+        /// Handles the application's quitting event by performing a best-effort save flush.
+        /// </summary>
+        private void HandleApplicationQuitting()
+        {
+            if (!_settings.AutoSaveOnQuit) return;
+
+            ProcessAutoSave();
+        }
+
+        /// <summary>
+        /// On mobile, flushes pending saves when focus is lost (app going to background may be OS-killed).
+        /// Skipped on desktop where focus changes are transient (alt-tab, click outside).
+        /// </summary>
+        /// <param name="focused">True on focus gain; false on focus loss.</param>
+        private void HandleFocusChanged(bool focused)
+        {
+            if (focused) return;
+            if (!Application.isMobilePlatform) return;
+            if (!_settings.AutoSaveOnQuit) return;
+
+            ProcessAutoSave();
+        }
+
+        /// <summary>
+        /// Drains in-flight async saves (bounded by AutoSaveOnQuitTimeout), then forces a final SaveImmediate.
+        /// Shared between quit and mobile-focus-loss handlers.
+        /// </summary>
+        /// <remarks>
+        /// Handle callbacks may fire after this returns (during shutdown/pause) — harmless since data
+        /// is already persisted. For guaranteed save-before-quit, call <see cref="WaitForPendingOperationsAsync"/> proactively.
+        /// </remarks>
+        private void ProcessAutoSave()
+        {
+            int timeout = _settings.AutoSaveOnQuitTimeout;
+
+            Task[] tasks;
+            lock (_stateLock)
+            {
+                tasks = _saveStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
+            }
+
+            if (tasks.Length > 0)
+            {
+                try
+                {
+                    Task.WaitAll(tasks, timeout);
+                }
+                catch
+                {
+                    // per-task errors already routed to each handle
+                }
+            }
+
+            try
+            {
+                SaveImmediate();
+            }
+            catch (InvalidOperationException)
+            {
+                DebugLog.Warning("AutoSaveOnQuit has been skipped (no current profile, or async drain timed out).");
+            }
+            catch (Exception e)
+            {
+                DebugLog.Error($"AutoSaveOnQuit has failed: {e.Message}");
+            }
+        }
 
         /// <summary>
         /// Reads isolated stored configuration blocks based on a savable's Key, and forces states appropriately.
@@ -782,15 +900,70 @@ namespace ThanhDV.GameSaver.Core
         }
 
         /// <summary>
+        /// Countdown timer called each frame by <see cref="AutoSaveTicker"/>.
+        /// Uses unscaled time, so it continues even when the game is paused (Time.timeScale == 0).
+        /// Does nothing if auto-save is disabled or no profile is active.
+        /// </summary>
+        /// <param name="deltaTime">Unscaled frame time delta.</param>
+        internal void AutoSaveTick(float deltaTime)
+        {
+            if (!_settings.EnableAutoSave) return;
+            if (string.IsNullOrEmpty(_curProfileId)) return;
+
+            _autoSaveCountdown -= deltaTime;
+            if (_autoSaveCountdown > 0) return;
+
+            _ = SaveAsync();
+            ResetAutoSaveCountdown();
+        }
+
+        private void ResetAutoSaveCountdown()
+        {
+            _autoSaveCountdown = _settings.AutoSaveTime;
+        }
+
+        /// <summary>
+        /// Invoked at the end of a successful save. Resets the auto-save countdown when the saved profile
+        /// matches the current implicit profile, then notifies external subscribers via <see cref="OnSaveCompleted"/>.
+        /// Both actions are marshaled to the captured SynchronizationContext.
+        /// </summary>
+        /// <param name="profileId">The profile that was just persisted to disk.</param>
+        private void NotifySaveCompleted(string profileId)
+        {
+            bool matchesCurrent = profileId == _curProfileId;
+            Action<string> handler = OnSaveCompleted;
+
+            if (_capturedContext != null && _capturedContext != SynchronizationContext.Current)
+            {
+                _capturedContext.Post(_ =>
+                {
+                    if (matchesCurrent) ResetAutoSaveCountdown();
+                    handler?.Invoke(profileId);
+                }, null);
+            }
+            else
+            {
+                if (matchesCurrent) ResetAutoSaveCountdown();
+                handler?.Invoke(profileId);
+            }
+        }
+
+        /// <summary>
         /// Tracks per-profile save state for concurrency control. Each profile being actively saved (or with pending save requests)
         /// has one instance of this class. Access must be guarded by GameSaver._stateLock.
         /// </summary>
         private class ProfileSaveState
         {
             /// <summary>
-            /// True while a save pipeline is in flight for this profile.
+            /// True iff any save (async or immediate) is in flight for this profile.
             /// </summary>
-            public bool IsRunning;
+            public bool IsRunning => RunningTask != null || IsSaveImmediate;
+
+            /// <summary>
+            /// Task from ProcessSaveAsync pipeline. Used to await all in-flight saves.
+            /// Null when idle or started via SaveImmediate (sync).
+            /// </summary>
+            public Task RunningTask;
 
             /// <summary>
             /// True if the in-flight save was started by SaveImmediate (synchronous).

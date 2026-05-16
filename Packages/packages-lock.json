@@ -222,7 +222,7 @@
       "url": "https://packages.unity.com"
     },
     "thanhdv.newtonsoft.json": {
-      "version": "3.2.6",
+      "version": "3.2.7",
       "depth": 0,
       "source": "registry",
       "dependencies": {},
