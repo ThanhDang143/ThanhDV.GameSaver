@@ -178,7 +178,9 @@ namespace ThanhDV.GameSaver.Tests.Editor
             yield return WaitForOperation(handle);
 
             Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
-            Assert.That(loadTarget.RestoreCallCount, Is.EqualTo(2), "Register triggers one immediate restore, load triggers another.");
+            Assert.That(loadTarget.RestoreCallCount, Is.EqualTo(1),
+                "Register-time restore is skipped because _curSaveData has no entry for 'player' yet (#21 fix). " +
+                "Only the load triggers RestoreData, with the real loaded data.");
             Assert.That(((TestSaveData)loadTarget.LastRestoredData).Value, Is.EqualTo(99));
 
             TestSavable saveTarget = new("other", new TestSaveData { Value = 1 });
@@ -396,7 +398,9 @@ namespace ThanhDV.GameSaver.Tests.Editor
             _gameSaver.SetSimple("coins", 1);
             _gameSaver.DeleteSimple("player-name");
 
-            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-simple");
+            // SetSimple/DeleteSimple after save → IsSimpleDataDirty == true.
+            // Need explicit discardUnsavedChanges=true to load over the modifications (#5 fix).
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-simple", discardUnsavedChanges: true);
             yield return WaitForOperation(handle);
 
             Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
@@ -438,12 +442,6 @@ namespace ThanhDV.GameSaver.Tests.Editor
             Assert.That(savable.RestoreCallCount, Is.EqualTo(0));
             Assert.That(savable.CaptureCallCount, Is.EqualTo(0));
         }
-
-        // ==============================================================================
-        // Concurrency tests — verify the dirty-flag + snapshot + per-profile state design.
-        // These tests use InMemoryStorageProvider.HoldWriteAsync() to freeze a save pipeline
-        // mid-flight, then issue more operations and observe coalesce / parallel / reject behaviors.
-        // ==============================================================================
 
         [UnityTest]
         public IEnumerator SaveAsync_SameProfile_Concurrent_CoalescesIntoTrailingSave()
@@ -755,14 +753,6 @@ namespace ThanhDV.GameSaver.Tests.Editor
             yield return WaitForOperation(saveHandle);
         }
 
-        // ==============================================================================
-        // App lifecycle & auto-save tests (Cluster #4)
-        // Cover WaitForPendingOperationsAsync, OnSaveCompleted event, auto-save countdown
-        // logic, and tick-driven saves. Lifecycle event hooks (Application.quitting /
-        // focusChanged) are not directly tested — they invoke PerformAutoSaveFlush which
-        // is exercised indirectly through WaitForPendingOperationsAsync + SaveImmediate.
-        // ==============================================================================
-
         [UnityTest]
         public IEnumerator WaitForPendingOperationsAsync_NoSaveInFlight_CompletesImmediately()
         {
@@ -910,6 +900,384 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
             // Prevent TearDown from disposing again on the already-disposed instance.
             _gameSaver = null;
+        }
+
+        [Test]
+        public void OperationInternal_CompleteTwice_StatusNotOverwritten()
+        {
+            (object op, MethodInfo complete, PropertyInfo status, _) = CreateNonGenericOp();
+
+            complete.Invoke(op, new object[] { null });                                   // first: success
+            object statusAfterFirst = status.GetValue(op);
+
+            complete.Invoke(op, new object[] { new InvalidOperationException("late") }); // attempt to fail
+            object statusAfterSecond = status.GetValue(op);
+
+            Assert.AreEqual(statusAfterFirst, statusAfterSecond,
+                "Calling Complete twice must not change Status — first call wins.");
+        }
+
+        [Test]
+        public void OperationInternal_CompleteTwice_ErrorPreserved()
+        {
+            (object op, MethodInfo complete, _, PropertyInfo error) = CreateNonGenericOp();
+
+            Exception firstError = new InvalidOperationException("first");
+            complete.Invoke(op, new object[] { firstError });
+            complete.Invoke(op, new object[] { null });  // attempt to mark as success
+
+            Assert.AreSame(firstError, error.GetValue(op),
+                "Calling Complete twice must not overwrite the original Error.");
+        }
+
+        [Test]
+        public void OperationInternal_CompleteTwice_ContinuationFiresOnce()
+        {
+            (object op, MethodInfo complete, _, _) = CreateNonGenericOp();
+            Type opType = op.GetType();
+
+            int callCount = 0;
+            EventInfo continuationEvent = opType.GetEvent("ContinuationAction");
+            Action handler = () => callCount++;
+            continuationEvent.AddEventHandler(op, handler);
+
+            complete.Invoke(op, new object[] { null });
+            complete.Invoke(op, new object[] { null });
+
+            Assert.AreEqual(1, callCount,
+                "ContinuationAction must fire exactly once across multiple Complete calls.");
+        }
+
+        [Test]
+        public void OperationInternalGeneric_CompleteTwice_ResultPreserved()
+        {
+            Type openType = typeof(GameSaverRuntime).Assembly
+                .GetType("ThanhDV.GameSaver.Core.GameSaverOperationInternal`1");
+            Type closedType = openType.MakeGenericType(typeof(int));
+
+            object op = Activator.CreateInstance(closedType);
+            MethodInfo complete = closedType.GetMethod("Complete", new[] { typeof(int), typeof(Exception) });
+            PropertyInfo resultProp = closedType.GetProperty("Result");
+
+            complete.Invoke(op, new object[] { 42, null });                                    // first: success with 42
+            complete.Invoke(op, new object[] { 999, new InvalidOperationException("late") }); // attempt to overwrite
+
+            int result = (int)resultProp.GetValue(op);
+            Assert.AreEqual(42, result,
+                "Generic Complete called twice must preserve the first result.");
+        }
+
+        [Test]
+        public void SetSimple_NullReferenceValue_DoesNotThrow()
+        {
+            Assert.DoesNotThrow(() => _gameSaver.SetSimple<string>("name", null),
+                "Storing null must not throw — it represents an explicit 'no value', distinct from missing.");
+        }
+
+        [Test]
+        public void GetSimple_AfterStoredNull_ReturnsDefault_NotSuppliedDefaultValue()
+        {
+            _gameSaver.SetSimple<string>("name", null);
+            string result = _gameSaver.GetSimple<string>("name", defaultValue: "fallback");
+
+            Assert.IsNull(result,
+                "Stored-null returns default(T) (null for reference types) — distinct from missing key which returns supplied defaultValue.");
+        }
+
+        [Test]
+        public void GetSimple_MissingKey_ReturnsSuppliedDefaultValue()
+        {
+            string result = _gameSaver.GetSimple<string>("never-set-key", defaultValue: "fallback");
+
+            Assert.AreEqual("fallback", result,
+                "Missing key must return the caller-supplied defaultValue.");
+        }
+
+        [Test]
+        public void HasSimpleKey_AfterStoredNull_ReturnsTrue()
+        {
+            _gameSaver.SetSimple<string>("name", null);
+
+            Assert.IsTrue(_gameSaver.HasSimpleKey("name"),
+                "HasSimpleKey must return true for keys with stored null — they are present, just empty.");
+        }
+
+        [Test]
+        public void SetSimple_NullableInt_RoundTripsNull()
+        {
+            _gameSaver.SetSimple<int?>("score", null);
+            int? result = _gameSaver.GetSimple<int?>("score", defaultValue: 99);
+
+            Assert.IsNull(result,
+                "Nullable<int> null must round-trip as null, not as supplied defaultValue.");
+        }
+
+        [Test]
+        public void SetSimple_OverwriteValueWithNull_GetReturnsNull()
+        {
+            _gameSaver.SetSimple<string>("name", "Alice");
+            _gameSaver.SetSimple<string>("name", null);  // overwrite
+
+            string result = _gameSaver.GetSimple<string>("name", defaultValue: "fallback");
+            Assert.IsNull(result,
+                "Overwriting a value with null must yield null on read, not the previous value or defaultValue.");
+        }
+
+        [Test]
+        public void SetSimple_ValueType_StoresAndReadsBack()
+        {
+            // Value type (int) cannot be null — must follow the normal serialize path.
+            _gameSaver.SetSimple<int>("coins", 100);
+            int result = _gameSaver.GetSimple<int>("coins", defaultValue: 0);
+            Assert.AreEqual(100, result);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_MissingSavableKey_RestoreDataNotCalled()
+        {
+            // Save a profile with no savables registered → save file has empty DataModules.
+            _gameSaver.SaveImmediate("empty-profile");
+
+            // Register a savable AFTER the save. Its key has no entry in the persisted file.
+            TestSavable lateSavable = new("late-key", new TestSaveData { Value = 99 });
+            _registry.Register(lateSavable);
+            int restoreCountAfterRegister = lateSavable.RestoreCallCount;
+
+            yield return WaitForOperation(_gameSaver.LoadAsync("empty-profile"));
+
+            Assert.AreEqual(restoreCountAfterRegister, lateSavable.RestoreCallCount,
+                "Load must NOT invoke RestoreData when the savable's key has no entry in the save file.");
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_ExistingSavableKey_RestoreDataCalled()
+        {
+            // Set up: register a savable, save → save file contains data for this key.
+            TestSavable savable = new("present-key", new TestSaveData { Value = 42 });
+            _registry.Register(savable);
+            _gameSaver.SaveImmediate("populated");
+
+            int restoreCountBefore = savable.RestoreCallCount;
+
+            yield return WaitForOperation(_gameSaver.LoadAsync("populated"));
+
+            Assert.Greater(savable.RestoreCallCount, restoreCountBefore,
+                "Load must invoke RestoreData when the savable's key has an entry in the save file.");
+            Assert.IsNotNull(savable.LastRestoredData);
+        }
+
+        // ===================================================================
+        // Cụm #5 — IsSimpleDataDirty tracking + LoadAsync discardUnsavedChanges
+        // ===================================================================
+
+        [Test]
+        public void IsSimpleDataDirty_AfterConstruction_IsFalse()
+        {
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [Test]
+        public void SetSimple_SetsDirtyFlag()
+        {
+            _gameSaver.SetSimple("coins", 100);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [Test]
+        public void DeleteSimple_ExistingKey_SetsDirtyFlag()
+        {
+            _gameSaver.SetSimple("coins", 100);
+            _gameSaver.SaveImmediate("profile-prep");  // clear dirty via save
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty, "Sanity: save should clear dirty.");
+
+            _gameSaver.DeleteSimple("coins");
+
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [Test]
+        public void DeleteSimple_NonExistingKey_DoesNotSetDirtyFlag()
+        {
+            _gameSaver.DeleteSimple("never-set-key");
+
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty,
+                "Deleting a key that doesn't exist leaves state unchanged — must not mark dirty.");
+        }
+
+        [Test]
+        public void SaveImmediate_ClearsDirtyFlag()
+        {
+            _gameSaver.SetSimple("coins", 100);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            _gameSaver.SaveImmediate("profile-clear");
+
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_ClearsDirtyFlag()
+        {
+            _gameSaver.SetSimple("coins", 100);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            yield return WaitForOperation(_gameSaver.SaveAsync("profile-clear-async"));
+
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_ClearsDirtyFlag()
+        {
+            _gameSaver.SaveImmediate("profile-load-target");
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            yield return WaitForOperation(_gameSaver.LoadAsync("profile-load-target", discardUnsavedChanges: true));
+
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [Test]
+        public void DeleteProfile_CurrentProfile_ClearsDirtyFlag()
+        {
+            SetPrivateField(_gameSaver, "_curProfileId", "current-profile");
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            _gameSaver.DeleteProfile("current-profile");
+
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [Test]
+        public void DeleteProfile_OtherProfile_PreservesDirtyFlag()
+        {
+            SetPrivateField(_gameSaver, "_curProfileId", "current-profile");
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            _gameSaver.DeleteProfile("other-profile");
+
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty,
+                "Deleting an unrelated profile must not touch the current state's dirty flag.");
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhenDirty_WithoutDiscardFlag_HandleCompletesFailed()
+        {
+            _gameSaver.SaveImmediate("profile-target");
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-target");
+            yield return WaitForOperation(handle);
+
+            Assert.AreEqual(GameSaverOperationStatus.Failed, handle.Status);
+            Assert.IsInstanceOf<InvalidOperationException>(handle.Error);
+            Assert.That(handle.Error.Message, Does.Contain("unsaved").IgnoreCase);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhenDirty_WithDiscardFlag_HandleCompletesSucceeded()
+        {
+            _gameSaver.SaveImmediate("profile-target");
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-target", discardUnsavedChanges: true);
+            yield return WaitForOperation(handle);
+
+            Assert.AreEqual(GameSaverOperationStatus.Succeeded, handle.Status);
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_NotDirty_HandleCompletesSucceeded()
+        {
+            _gameSaver.SaveImmediate("profile-target");
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("profile-target");
+            yield return WaitForOperation(handle);
+
+            Assert.AreEqual(GameSaverOperationStatus.Succeeded, handle.Status);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadBackupAsync_WhenDirty_WithoutDiscardFlag_HandleCompletesFailed()
+        {
+            SaveData backupData = new();
+            string serialized = _serializer.RegisterSerializedValue(backupData);
+            _storage.SetBackupFile("profile-backup", SaveFileName, serialized);
+
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadBackupAsync("profile-backup");
+            yield return WaitForOperation(handle);
+
+            Assert.AreEqual(GameSaverOperationStatus.Failed, handle.Status);
+            Assert.IsInstanceOf<InvalidOperationException>(handle.Error);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadMostRecentAsync_WhenDirty_WithoutDiscardFlag_HandleCompletesFailed()
+        {
+            SaveData data = new();
+            string serialized = _serializer.RegisterSerializedValue(data);
+            _storage.SetPrimaryFile("recent", SaveFileName, serialized);
+            _storage.MostRecentProfileId = "recent";
+
+            _gameSaver.SetSimple("k", 1);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty, "Sanity precondition.");
+
+            GameSaverOperationHandle handle = _gameSaver.LoadMostRecentAsync();
+            yield return WaitForOperation(handle);
+
+            Assert.AreEqual(GameSaverOperationStatus.Failed, handle.Status);
+            Assert.IsInstanceOf<InvalidOperationException>(handle.Error);
+        }
+
+        [UnityTest]
+        public IEnumerator SetSimple_BetweenCaptureAndPipelineEnd_RemarksDirty()
+        {
+            // Verifies the timing semantic: dirty is cleared AT CAPTURE time, not at pipeline end.
+            // Any SetSimple between capture and pipeline-completion must re-mark dirty — those changes
+            // are not in the snapshot being written.
+
+            _gameSaver.SetSimple("before-capture", 1);
+
+            _storage.HoldWriteAsync();
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-race");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "save did not reach WriteAsync");
+
+            // Capture already happened inside the lock → dirty should be cleared by now.
+            Assert.IsFalse(_gameSaver.IsSimpleDataDirty,
+                "Dirty must be cleared at capture time (inside the snapshot lock).");
+
+            // SetSimple AFTER capture: change not in snapshot → must re-mark dirty.
+            _gameSaver.SetSimple("after-capture", 2);
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty,
+                "SetSimple after capture must re-mark dirty — its change is not in the snapshot being written.");
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(handle);
+
+            // After save completes, the post-capture SetSimple still represents an unsaved change.
+            Assert.IsTrue(_gameSaver.IsSimpleDataDirty,
+                "After save completes, the post-capture change remains as unsaved state.");
+        }
+
+        private static (object op, MethodInfo complete, PropertyInfo status, PropertyInfo error) CreateNonGenericOp()
+        {
+            Type opType = typeof(GameSaverRuntime).Assembly
+                .GetType("ThanhDV.GameSaver.Core.GameSaverOperationInternal");
+            object op = Activator.CreateInstance(opType);
+            MethodInfo complete = opType.GetMethod("Complete", new[] { typeof(Exception) });
+            PropertyInfo status = opType.GetProperty("Status");
+            PropertyInfo error = opType.GetProperty("Error");
+            return (op, complete, status, error);
         }
 
         private static string SaveFileName => "slot.sav";

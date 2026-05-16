@@ -52,10 +52,15 @@ namespace ThanhDV.GameSaver.Core
 
         /// <summary>
         /// Finalizes the operation, updating its state and triggering all pending callbacks.
+        /// Idempotent — second and later calls are no-ops, preserving the original outcome.
         /// </summary>
         /// <param name="error">The exception to set if the operation failed. Null indicates success.</param>
         public void Complete(Exception error = null)
         {
+            // Idempotent guard: the first call wins. Prevents state from being overwritten
+            // and callbacks from firing twice if a pipeline bug or reentrancy triggers a second Complete.
+            if (IsDone) return;
+
             Error = error;
             Status = error == null ? GameSaverOperationStatus.Succeeded : GameSaverOperationStatus.Failed;
             PercentComplete = 1f;
@@ -133,11 +138,16 @@ namespace ThanhDV.GameSaver.Core
 
         /// <summary>
         /// Finalizes the operation, sets the result, and triggers all pending callbacks.
+        /// Idempotent — second and later calls are no-ops, preserving the original outcome.
         /// </summary>
         /// <param name="result">The result value of the operation.</param>
         /// <param name="error">The exception to set if the operation failed. Null indicates success.</param>
         public void Complete(T result, Exception error = null)
         {
+            // Idempotent guard: the first call wins. Prevents state from being overwritten
+            // and callbacks from firing twice if a pipeline bug or reentrancy triggers a second Complete.
+            if (IsDone) return;
+
             Result = result;
             Error = error;
             Status = error == null ? GameSaverOperationStatus.Succeeded : GameSaverOperationStatus.Failed;

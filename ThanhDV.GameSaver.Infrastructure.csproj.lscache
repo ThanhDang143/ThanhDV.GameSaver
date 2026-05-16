@@ -292,7 +292,6 @@ Library/ScriptAssemblies/
 Temp/bin/Debug/
  ThanhDV.GameSaver.Common.dll
  ThanhDV.GameSaver.Core.dll
- ThanhDV.GameSaver.CustomAttribute.dll
 
 [analyzerReferences]
 C:/Program Files/Unity/Hub/Editor/2022.3.62f3/Editor/Data/Tools/Unity.SourceGenerators/

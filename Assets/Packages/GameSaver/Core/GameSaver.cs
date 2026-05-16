@@ -22,6 +22,13 @@ namespace ThanhDV.GameSaver.Core
         private float _autoSaveCountdown;
 
         /// <summary>
+        /// True when unsaved changes exist via SetSimple/DeleteSimple since the last save or load.
+        /// Check before profile switches to warn "Save before loading?".
+        /// LoadAsync throws when dirty to prevent data loss — use <c>discardUnsavedChanges: true</c> to skip.
+        /// </summary>
+        private bool _isSimpleDataDirty; public bool IsSimpleDataDirty => _isSimpleDataDirty;
+
+        /// <summary>
         /// Caller's SynchronizationContext captured at construction. Used to marshal OnSaveCompleted
         /// invocations and the auto-save countdown reset back to the original thread (typically Unity main thread).
         /// </summary>
@@ -134,6 +141,7 @@ namespace ThanhDV.GameSaver.Core
                 {
                     _curProfileId = null;
                     _curSaveData = new();
+                    ClearSimpleDataDirtyFlag();
                 }
 
                 _saveStates.Remove(profileId);
@@ -236,6 +244,7 @@ namespace ThanhDV.GameSaver.Core
 
                 CaptureAllSavables();
                 snapshot = _curSaveData.Clone();
+                ClearSimpleDataDirtyFlag();
             }
 
             try
@@ -297,39 +306,58 @@ namespace ThanhDV.GameSaver.Core
         }
 
         /// <summary>
-        /// Asynchronously loads the game state from the specified profile and restores it to all registered savables.
+        /// Loads game data from the specified profile and restores it to registered ISavable instances.
         /// </summary>
         /// <param name="profileId">The ID of the profile to load.</param>
-        /// <returns>A handle to track the progress and completion of the load operation.</returns>
-        public GameSaverOperationHandle LoadAsync(string profileId)
+        /// <param name="discardUnsavedChanges">
+        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
+        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
+        /// changes and continue loading.
+        /// </param>
+        public GameSaverOperationHandle LoadAsync(string profileId, bool discardUnsavedChanges = false)
         {
             GameSaverOperationInternal internalOp = new();
 
-            _ = ProcessLoadAsync(profileId, false, internalOp);
+            if (!TryAuthorizeLoad(profileId, discardUnsavedChanges, internalOp))
+            {
+                return new GameSaverOperationHandle(internalOp);
+            }
 
+            _ = ProcessLoadAsync(profileId, false, internalOp);
             return new GameSaverOperationHandle(internalOp);
         }
 
         /// <summary>
-        /// Asynchronously loads the game state from the backup file rather than the primary file. 
-        /// Use this when the main save is corrupted or missing.
+        /// Loads data from the backup file instead of the main file. Use this when the main save is corrupted.
         /// </summary>
-        /// <param name="profileId">The ID of the profile to load backup data from.</param>
-        /// <returns>A handle to track the progress and completion of the load operation.</returns>
-        public GameSaverOperationHandle LoadBackupAsync(string profileId)
+        /// <param name="profileId">The ID of the profile whose backup should be loaded.</param>
+        /// <param name="discardUnsavedChanges">
+        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
+        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
+        /// changes and continue loading.
+        /// </param>
+        public GameSaverOperationHandle LoadBackupAsync(string profileId, bool discardUnsavedChanges = false)
         {
             GameSaverOperationInternal internalOp = new();
 
-            _ = ProcessLoadAsync(profileId, true, internalOp);
+            if (!TryAuthorizeLoad(profileId, discardUnsavedChanges, internalOp))
+            {
+                return new GameSaverOperationHandle(internalOp);
+            }
 
+            _ = ProcessLoadAsync(profileId, true, internalOp);
             return new GameSaverOperationHandle(internalOp);
         }
 
         /// <summary>
         /// Attempts to lazily resolve the most recently saved profile and loads it asynchronously. 
         /// </summary>
-        /// <returns>A handle tracking completion. It will fault if no previous profiles are found.</returns>
-        public GameSaverOperationHandle LoadMostRecentAsync()
+        /// <param name="discardUnsavedChanges">
+        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
+        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
+        /// changes and continue loading.
+        /// </param>
+        public GameSaverOperationHandle LoadMostRecentAsync(bool discardUnsavedChanges = false)
         {
             GameSaverOperationInternal internalOp = new();
 
@@ -341,6 +369,11 @@ namespace ThanhDV.GameSaver.Core
                 {
                     FileNotFoundException e = new("No previously saved Profile could be found.");
                     internalOp.Complete(e);
+                    return new GameSaverOperationHandle(internalOp);
+                }
+
+                if (!TryAuthorizeLoad(mostRecentProfile, discardUnsavedChanges, internalOp))
+                {
                     return new GameSaverOperationHandle(internalOp);
                 }
 
@@ -434,6 +467,7 @@ namespace ThanhDV.GameSaver.Core
                 {
                     CaptureAllSavables();
                     snapshot = _curSaveData.Clone();
+                    ClearSimpleDataDirtyFlag();
                 }
 
                 internalOp.PercentComplete = 0.2f;
@@ -519,6 +553,7 @@ namespace ThanhDV.GameSaver.Core
                 {
                     _curSaveData = loadedData ?? new();
                     _curProfileId = profileId;
+                    ClearSimpleDataDirtyFlag();
                     savableSnapshots = _registry.Savables.ToList();
                     restoreSnapshot = _curSaveData.Clone();
                 }
@@ -674,9 +709,14 @@ namespace ThanhDV.GameSaver.Core
                 return;
             }
 
-            string serializedValue = _serializer.Serialize(value);
+            // Null is valid — bypass serializer, store as sentinel. GetSimple returns default(T).
+            string serializedValue = value is null ? null : _serializer.Serialize(value);
 
-            lock (_stateLock) _curSaveData.SimpleData[key] = serializedValue;
+            lock (_stateLock)
+            {
+                _curSaveData.SimpleData[key] = serializedValue;
+                MarkSimpleDataDirtyFlag();
+            }
         }
 
         /// <summary>
@@ -699,6 +739,9 @@ namespace ThanhDV.GameSaver.Core
             lock (_stateLock) found = _curSaveData.SimpleData.TryGetValue(key, out serializedValue);
 
             if (!found) return defaultValue;
+
+            // Null = explicitly stored. Returns default(T), not the supplied defaultValue.
+            if (serializedValue == null) return default;
 
             try
             {
@@ -739,7 +782,11 @@ namespace ThanhDV.GameSaver.Core
                 return;
             }
 
-            lock (_stateLock) _curSaveData.SimpleData.Remove(key);
+            lock (_stateLock)
+            {
+                if (_curSaveData.SimpleData.Remove(key)) MarkSimpleDataDirtyFlag();
+            }
+
         }
 
         #endregion
@@ -863,14 +910,15 @@ namespace ThanhDV.GameSaver.Core
         }
 
         /// <summary>
-        /// Restores a savable from the provided save-data snapshot instead of the current in-memory profile.
-        /// This is used during load so state can be applied before the new profile is committed.
+        /// Restores a savable from the provided save-data snapshot.
+        /// Skips invocation entirely when no entry exists for the savable's key — the object keeps its
+        /// default state, freeing user code from having to null-check inside RestoreData.
         /// </summary>
         /// <param name="savable">The savable instance to restore.</param>
         /// <param name="sourceSaveData">The save-data snapshot used for lookup.</param>
         private void RestoreSavable(ISavable savable, SaveData sourceSaveData)
         {
-            sourceSaveData.DataModules.TryGetValue(savable.SaveKey, out ISaveData saveData);
+            if (!sourceSaveData.DataModules.TryGetValue(savable.SaveKey, out ISaveData saveData)) return;
             savable.RestoreData(saveData);
         }
 
@@ -946,6 +994,39 @@ namespace ThanhDV.GameSaver.Core
                 if (matchesCurrent) ResetAutoSaveCountdown();
                 handler?.Invoke(profileId);
             }
+        }
+
+        /// <summary>
+        /// Marks unsaved changes. Called by SetSimple/DeleteSimple after mutating _curSaveData.SimpleData.
+        /// </summary>
+        private void MarkSimpleDataDirtyFlag()
+        {
+            lock (_stateLock) _isSimpleDataDirty = true;
+        }
+
+        /// <summary>
+        /// Clears the dirty flag. Called after a successful save or load.
+        /// </summary>
+        private void ClearSimpleDataDirtyFlag()
+        {
+            lock (_stateLock) _isSimpleDataDirty = false;
+        }
+
+        /// <summary>
+        /// Returns true if load can proceed. Returns false and completes the handle with an error
+        /// if unsaved changes exist and discardUnsavedChanges is false.
+        /// </summary>
+        private bool TryAuthorizeLoad(string profileId, bool discardUnsavedChanges, GameSaverOperationInternal intenalOp)
+        {
+            if (_isSimpleDataDirty && !discardUnsavedChanges)
+            {
+                InvalidOperationException error = new($"Cannot load profile '{profileId}' — unsaved changes exist. Save first or pass discardUnsavedChanges: true.");
+
+                intenalOp.Complete(error);
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
