@@ -13,3 +13,6 @@ Mục đích chính là để có thể đổi tên class implement ISaveData, I
 ## Không hỗ trợ WebGL, PlayStation 4/5, Xbox One/Series, Nintendo Switch
 * WebGL do Async I/O fail, MEMFS không persistent
 * Console do dùng SDK riêng của hãng
+
+## Cho phép trùng SaveKey
+* Các object có cùng SaveKey sẽ có chung data khi Load và có dữ liệu của 

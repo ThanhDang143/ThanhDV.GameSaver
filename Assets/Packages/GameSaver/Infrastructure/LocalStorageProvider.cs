@@ -16,6 +16,12 @@ namespace ThanhDV.GameSaver.Infrastructure
         {
             if (string.IsNullOrEmpty(basePath)) throw new ArgumentNullException(nameof(basePath));
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+            throw new PlatformNotSupportedException("LocalStorageProvider does not support WebGL. Provide a custom IStorageProvider (e.g. backed by PlayerPrefs or IndexedDB via a JSLib bridge).");
+#elif (UNITY_PS4 || UNITY_PS5 || UNITY_XBOXONE || UNITY_GAMECORE || UNITY_SWITCH) && !UNITY_EDITOR
+            throw new PlatformNotSupportedException("LocalStorageProvider does not support console platforms (PlayStation, Xbox, Switch). Provide a custom IStorageProvider that wraps the platform's official Save Data API.");
+#endif
+
             _basePath = basePath;
         }
 
