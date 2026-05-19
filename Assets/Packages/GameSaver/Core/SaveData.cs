@@ -3,16 +3,16 @@ using System.Collections.Generic;
 namespace ThanhDV.GameSaver.Core
 {
     /// <summary>
-    /// Represents the root container for all saveable data modules in the game.
+    /// Represents the root container for all saveable object data in the game.
     /// </summary>
     [System.Serializable]
     public class SaveData
     {
         /// <summary>
-        /// Dictionary storing the data modules. Each implementation of ISaveData is considered a module.
+        /// Dictionary storing the object data. Each implementation of ISaveData is considered a module.
         /// Must be public for Newtonsoft.Json serialization to work properly.
         /// </summary>
-        public Dictionary<string, ISaveData> DataModules { get; set; } = new();
+        public Dictionary<string, ISaveData> ObjectData { get; set; } = new();
 
         /// <summary>
         /// Dictionary storing individual values for direct in-memory read and write operations.
@@ -30,7 +30,7 @@ namespace ThanhDV.GameSaver.Core
         {
             SaveData clone = new()
             {
-                DataModules = new(DataModules),
+                ObjectData = new(ObjectData),
                 SimpleData = new(SimpleData)
             };
 
@@ -48,14 +48,14 @@ namespace ThanhDV.GameSaver.Core
         {
             string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
 
-            if (DataModules.TryGetValue(key, out ISaveData data))
+            if (ObjectData.TryGetValue(key, out ISaveData data))
             {
                 return data as T;
             }
 
             // Create a new instance if it doesn't exist
             T newData = new();
-            DataModules[key] = newData;
+            ObjectData[key] = newData;
             return newData;
         }
 
@@ -70,7 +70,7 @@ namespace ThanhDV.GameSaver.Core
             if (data == null) return;
             string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
 
-            DataModules[key] = data;
+            ObjectData[key] = data;
         }
 
         /// <summary>
@@ -82,7 +82,7 @@ namespace ThanhDV.GameSaver.Core
         {
             string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
 
-            if (DataModules.ContainsKey(key)) DataModules.Remove(key);
+            if (ObjectData.ContainsKey(key)) ObjectData.Remove(key);
         }
         */
     }

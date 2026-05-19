@@ -918,7 +918,7 @@ namespace ThanhDV.GameSaver.Core
         /// <param name="sourceSaveData">The save-data snapshot used for lookup.</param>
         private void RestoreSavable(ISavable savable, SaveData sourceSaveData)
         {
-            if (!sourceSaveData.DataModules.TryGetValue(savable.SaveKey, out ISaveData saveData)) return;
+            if (!sourceSaveData.ObjectData.TryGetValue(savable.SaveKey, out ISaveData saveData)) return;
             savable.RestoreData(saveData);
         }
 
@@ -933,7 +933,7 @@ namespace ThanhDV.GameSaver.Core
 
             if (saveData == null) return;
 
-            _curSaveData.DataModules[savable.SaveKey] = saveData;
+            _curSaveData.ObjectData[savable.SaveKey] = saveData;
         }
 
         /// <summary>

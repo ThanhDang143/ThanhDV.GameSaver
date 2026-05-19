@@ -169,7 +169,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             TestSavable loadTarget = new("player", null);
             SaveData loadedData = new();
-            loadedData.DataModules["player"] = new TestSaveData { Value = 99 };
+            loadedData.ObjectData["player"] = new TestSaveData { Value = 99 };
             string serialized = _serializer.RegisterSerializedValue(loadedData);
             _storage.SetPrimaryFile("profile-load", SaveFileName, serialized);
             _registry.Register(loadTarget);
@@ -195,7 +195,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             TestSavable savable = new("player", null);
             SaveData loadedData = new();
-            loadedData.DataModules["player"] = new TestSaveData { Value = 7 };
+            loadedData.ObjectData["player"] = new TestSaveData { Value = 7 };
             string serialized = _serializer.RegisterSerializedValue(loadedData);
             _storage.SetBackupFile("profile-backup", SaveFileName, serialized);
             _registry.Register(savable);
@@ -224,7 +224,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             TestSavable savable = new("player", null);
             SaveData loadedData = new();
-            loadedData.DataModules["player"] = new TestSaveData { Value = 15 };
+            loadedData.ObjectData["player"] = new TestSaveData { Value = 15 };
             string serialized = _serializer.RegisterSerializedValue(loadedData);
             _storage.MostRecentProfileId = "recent-profile";
             _storage.SetPrimaryFile("recent-profile", SaveFileName, serialized);
@@ -300,7 +300,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         public IEnumerator DeleteProfile_CurrentProfileIsCleared_AfterSuccessfulLoad()
         {
             SaveData loadedData = new();
-            loadedData.DataModules["player"] = new TestSaveData { Value = 1 };
+            loadedData.ObjectData["player"] = new TestSaveData { Value = 1 };
             string serialized = _serializer.RegisterSerializedValue(loadedData);
             _storage.SetPrimaryFile("profile-delete", SaveFileName, serialized);
 
@@ -412,7 +412,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         public IEnumerator RegistryEvents_AutoRestoreOnRegister_AndCaptureOnUnregister()
         {
             SaveData loadedData = new();
-            loadedData.DataModules["player"] = new TestSaveData { Value = 77 };
+            loadedData.ObjectData["player"] = new TestSaveData { Value = 77 };
             string serialized = _serializer.RegisterSerializedValue(loadedData);
             _storage.SetPrimaryFile("profile-events", SaveFileName, serialized);
             yield return WaitForOperation(_gameSaver.LoadAsync("profile-events"));
@@ -426,7 +426,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             Assert.That(((TestSaveData)savable.LastRestoredData).Value, Is.EqualTo(77));
 
             SaveData savedData = _serializer.GetLastSerializedObject<SaveData>();
-            Assert.That(((TestSaveData)savedData.DataModules["player"]).Value, Is.EqualTo(88));
+            Assert.That(((TestSaveData)savedData.ObjectData["player"]).Value, Is.EqualTo(88));
         }
 
         [Test]
@@ -496,7 +496,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
             SaveData lastSaveData = _serializer.GetLastSerializedObject<SaveData>();
             Assert.That(lastSaveData, Is.Not.Null);
-            Assert.That(((TestSaveData)lastSaveData.DataModules["player"]).Value, Is.EqualTo(99),
+            Assert.That(((TestSaveData)lastSaveData.ObjectData["player"]).Value, Is.EqualTo(99),
                 "Trailing save should have captured the mutated value (99), not the leading's value (1).");
         }
 
@@ -589,7 +589,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             // Setup: pre-populate profile-A and load it so _curProfileId = "profile-A".
             SaveData stored = new();
-            stored.DataModules["player"] = new TestSaveData { Value = 1 };
+            stored.ObjectData["player"] = new TestSaveData { Value = 1 };
             string serialized = _serializer.RegisterSerializedValue(stored);
             _storage.SetPrimaryFile("profile-A", SaveFileName, serialized);
             _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
@@ -653,7 +653,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
 
             SaveData stored = new();
-            stored.DataModules["player"] = new TestSaveData { Value = 5 };
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
             string serialized = _serializer.RegisterSerializedValue(stored);
             _storage.SetPrimaryFile("profile-conflict", SaveFileName, serialized);
 
@@ -679,7 +679,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
 
             SaveData stored = new();
-            stored.DataModules["player"] = new TestSaveData { Value = 7 };
+            stored.ObjectData["player"] = new TestSaveData { Value = 7 };
             string serialized = _serializer.RegisterSerializedValue(stored);
             _storage.SetPrimaryFile("profile-load-target", SaveFileName, serialized);
 
@@ -1035,7 +1035,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         [UnityTest]
         public IEnumerator LoadAsync_MissingSavableKey_RestoreDataNotCalled()
         {
-            // Save a profile with no savables registered → save file has empty DataModules.
+            // Save a profile with no savables registered → save file has empty ObjectData.
             _gameSaver.SaveImmediate("empty-profile");
 
             // Register a savable AFTER the save. Its key has no entry in the persisted file.
@@ -1588,9 +1588,9 @@ namespace ThanhDV.GameSaver.Tests.Editor
             {
                 SaveData clone = new();
 
-                foreach (KeyValuePair<string, ISaveData> item in source.DataModules)
+                foreach (KeyValuePair<string, ISaveData> item in source.ObjectData)
                 {
-                    clone.DataModules[item.Key] = (ISaveData)CloneObject(item.Value);
+                    clone.ObjectData[item.Key] = (ISaveData)CloneObject(item.Value);
                 }
 
                 foreach (KeyValuePair<string, string> item in source.SimpleData)

@@ -60,7 +60,7 @@ classDiagram
         }
 
         class SaveData {
-            +Dictionary~string, ISaveData~ DataModules
+            +Dictionary~string, ISaveData~ ObjectData
             +GetData~T~(string customKey = null) T
             +SetData~T~(T data, string customKey = null) void
             +RemoveData~T~(string customKey = null) void
@@ -218,7 +218,7 @@ classDiagram
 
     %% --- RELATIONSHIPS ---
     SaveRegistry "1" *-- "*" ISavable : tracks
-    SaveData o-- ISaveData : stores modules
+    SaveData o-- ISaveData : stores object
     ISavable ..> ISaveData : capture/restore
     CustomSaveData ..|> ISaveData : implements
     CustomSaveMeta ..|> ISaveMeta : implements

@@ -9,3 +9,7 @@ Mục đích chính là để có thể đổi tên class implement ISaveData, I
 * Assemblies được scan 1 lần khi khởi tạo Serializer. Vậy nên những trường hợp như mod game, load .dll trong runtime cần manual bind Serializer.Binder.Register(type, alias); nhưng đừng lo 99% game thường không gặp trường hợp này.
 * Trường hợp BaseSave : ISaveData, PlayerSave : BaseSave thì PlayerSave coi như không có alias. Mỗi class cần khai báo alias riêng. Best practice là class cha không có alias. Đặt alias với những class con.
 * ScanAssemblies sẽ skip Interface / abstract class / generic definition
+
+## Không hỗ trợ WebGL, PlayStation 4/5, Xbox One/Series, Nintendo Switch
+* WebGL do Async I/O fail, MEMFS không persistent
+* Console do dùng SDK riêng của hãng
