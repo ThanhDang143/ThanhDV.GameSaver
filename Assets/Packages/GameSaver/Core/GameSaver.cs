@@ -547,14 +547,14 @@ namespace ThanhDV.GameSaver.Core
                 });
 
                 // Capture snapshots to isolate restore from concurrent SetSimple mutations.
-                List<ISavable> savableSnapshots;
+                IReadOnlyList<ISavable> savableSnapshots;
                 SaveData restoreSnapshot;
                 lock (_stateLock)
                 {
                     _curSaveData = loadedData ?? new();
                     _curProfileId = profileId;
                     ClearSimpleDataDirtyFlag();
-                    savableSnapshots = _registry.Savables.ToList();
+                    savableSnapshots = _registry.Savables;
                     restoreSnapshot = _curSaveData.Clone();
                 }
 

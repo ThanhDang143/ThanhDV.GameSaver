@@ -10,44 +10,63 @@ namespace ThanhDV.GameSaver.Core
     /// </summary>
     public class SaveRegistry
     {
-        private readonly HashSet<ISavable> _savables = new();
+        /// <summary>
+        /// Primary storage keyed by <see cref="ISavable.SaveKey"/>.
+        /// </summary>
+        private readonly Dictionary<string, ISavable> _savables = new();
 
         /// <summary>
-        /// Gets an immediate snapshot of the currently registered <see cref="ISavable"/> instances.
+        /// Protects all access to _savables.
+        /// </summary>
+        private readonly object _lock = new();
+
+        /// <summary>
+        /// Gets a fresh snapshot of registered <see cref="ISavable"/> instances.
         /// </summary>
         /// <remarks>
-        /// Side effect: the getter removes dead references (null or destroyed Unity objects) from the registry
-        /// before creating the snapshot. A warning is logged when this happens, which usually means user code
-        /// forgot to call <see cref="Unregister"/> in OnDestroy.
-        /// Each access creates a new List; the result is not cached. Callers can iterate safely even if
-        /// Register or Unregister is called afterward.
+        /// Dead references are pruned before the snapshot is created. The returned list is independent
+        /// of later registry changes, so callers can iterate it safely.
         /// </remarks>
         public IReadOnlyList<ISavable> Savables
         {
             get
             {
-                int pruned;
+                int prunedCount;
                 List<ISavable> snapshot;
 
                 lock (_lock)
                 {
-                    pruned = _savables.RemoveWhere(IsDeadReference);
-                    snapshot = _savables.ToList();
+                    List<string> deadKeys = null;
+                    foreach (KeyValuePair<string, ISavable> kvp in _savables)
+                    {
+                        if (IsDeadReference(kvp.Value))
+                        {
+                            deadKeys ??= new();
+                            deadKeys.Add(kvp.Key);
+                        }
+                    }
+
+                    if (deadKeys != null)
+                    {
+                        for (int i = 0; i < deadKeys.Count; i++) _savables.Remove(deadKeys[i]);
+                        prunedCount = deadKeys.Count;
+                    }
+                    else
+                    {
+                        prunedCount = 0;
+                    }
+
+                    snapshot = _savables.Values.ToList();
                 }
 
-                if (pruned > 0)
+                if (prunedCount > 0)
                 {
-                    DebugLog.Warning($"SaveRegistry pruned {pruned} dead reference(s). Make sure to call Unregister() in OnDestroy for MonoBehaviour ISavable instances.");
+                    DebugLog.Warning($"SaveRegistry pruned {prunedCount} dead reference(s). Make sure to call Unregister() for any ISavable instances.");
                 }
 
                 return snapshot;
             }
         }
-
-        /// <summary>
-        /// Protects all access to _savables. Events are fired outside the lock to avoid deadlocks with subscribers.
-        /// </summary>
-        private readonly object _lock = new();
 
         /// <summary>
         /// Event triggered when a new <see cref="ISavable"/> object is successfully registered.
@@ -60,36 +79,111 @@ namespace ThanhDV.GameSaver.Core
         public event Action<ISavable> OnSavableUnregistered;
 
         /// <summary>
-        /// Registers an <see cref="ISavable"/> object to the registry.
+        /// Registers a valid <see cref="ISavable"/> by its <see cref="ISavable.SaveKey"/>.
         /// </summary>
-        /// <param name="savable">The savable object to register.</param>
+        /// <param name="savable">The savable instance to register.</param>
+        /// <exception cref="DuplicateSaveKeyException">
+        /// Thrown when a different live savable already uses the same key.
+        /// </exception>
+        /// <remarks>
+        /// Re-registering the same instance is ignored. Null, destroyed, or empty-key savables are ignored.
+        /// Destroyed entries with the same key are replaced and logged.
+        /// </remarks>
         public void Register(ISavable savable)
         {
             if (IsDeadReference(savable)) return;
-            if (string.IsNullOrEmpty(savable.SaveKey)) return;
 
-            bool added;
-            lock (_lock) added = _savables.Add(savable);
+            string key = savable.SaveKey;
+            if (string.IsNullOrEmpty(key)) return;
 
-            if (!added) return;
+            bool autoReplaced = false;
+            bool shouldFireEvent = false;
 
-            OnSavableRegistered?.Invoke(savable);
+            lock (_lock)
+            {
+                if (_savables.TryGetValue(key, out ISavable existing))
+                {
+                    if (ReferenceEquals(existing, savable)) return;
+
+                    if (IsDeadReference(existing))
+                    {
+                        _savables[key] = savable;
+                        autoReplaced = true;
+                        shouldFireEvent = true;
+                    }
+                    else
+                    {
+                        throw new DuplicateSaveKeyException(key, existing.GetType(), savable.GetType());
+                    }
+                }
+                else
+                {
+                    _savables[key] = savable;
+                    shouldFireEvent = true;
+                }
+            }
+
+            if (autoReplaced)
+            {
+                DebugLog.Warning($"SaveRegistry auto-replaced dead reference for SaveKey '{key}'. Make sure to call Unregister() for any ISavable instances.");
+            }
+
+            if (shouldFireEvent) OnSavableRegistered?.Invoke(savable);
         }
 
         /// <summary>
-        /// Unregisters an <see cref="ISavable"/> object from the registry.
+        /// Removes a registered <see cref="ISavable"/>.
         /// </summary>
-        /// <param name="savable">The savable object to unregister.</param>
+        /// <param name="savable">The savable instance to remove.</param>
+        /// <remarks>
+        /// Uses the current <see cref="ISavable.SaveKey"/> first. If the key changed after registration,
+        /// falls back to reference lookup, removes the entry, and logs a warning.
+        /// </remarks>
         public void Unregister(ISavable savable)
         {
             if (savable is null) return;
 
-            bool removed;
-            lock (_lock) removed = _savables.Remove(savable);
+            bool removed = false;
+            bool keyChanged = false;
 
-            if (!removed) return;
+            lock (_lock)
+            {
+                string curKey = savable.SaveKey;
 
-            OnSavableUnregistered?.Invoke(savable);
+                // SaveKey unchanged since Register.
+                if (!string.IsNullOrEmpty(curKey) && _savables.TryGetValue(curKey, out ISavable existing) && ReferenceEquals(existing, savable))
+                {
+                    _savables.Remove(curKey);
+                    removed = true;
+                }
+                // SaveKey was changed since Register, or savable was never registered.
+                else
+                {
+                    string foundKey = null;
+                    foreach (KeyValuePair<string, ISavable> kvp in _savables)
+                    {
+                        if (ReferenceEquals(kvp.Value, savable))
+                        {
+                            foundKey = kvp.Key;
+                            break;
+                        }
+                    }
+
+                    if (foundKey != null)
+                    {
+                        _savables.Remove(foundKey);
+                        removed = true;
+                        keyChanged = !string.IsNullOrEmpty(curKey) && curKey != foundKey;
+                    }
+                }
+            }
+
+            if (keyChanged)
+            {
+                DebugLog.Warning($"SaveKey was changed since Register for '{savable.GetType().FullName}'. SaveKey must be immutable after registration.");
+            }
+
+            if (removed) OnSavableUnregistered?.Invoke(savable);
         }
 
         /// <summary>
