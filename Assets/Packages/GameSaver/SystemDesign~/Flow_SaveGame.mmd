@@ -1,36 +1,46 @@
+---
+config:
+  theme: dark
+title: GameSaver — Save Flow
+---
 sequenceDiagram
     autonumber
-    actor Player as Game / Triggers
-    participant Savable as ISavable Objects
-    participant SM as SaveManager (Core)
+    actor Caller as Game Code
+    participant GS as GameSaver
+    participant Sav as Registered ISavables
     participant Ser as ISerializer
     participant Enc as IEncryptionProvider
-    participant Storage as IStorageProvider
+    participant Store as IStorageProvider
 
-    Player->>SM: Call SaveGameAsync()
-    
-    rect rgba(0, 150, 255, 0.1)
-        Note over SM, Savable: 1. Data Collection (Memory)
-        SM->>Savable: Request data (Call SaveData(data))
-        Savable-->>SM: Update state into SaveData object
-    end
+    Caller->>GS: SaveAsync(profileId, metadata)
+    Note right of Caller: metadata may be null<br/>(lib uses DefaultSaveMeta)
 
-    rect rgba(255, 165, 0, 0.1)
-        Note over SM, Enc: 2. Data Processing (Serialization)
-        SM->>Ser: Serialize(SaveData)
-        Ser-->>SM: Return JSON string (Raw String)
-        
-        opt If UseEncryption = true
-            SM->>Enc: Encrypt(Raw String, SecretKey)
-            Enc-->>SM: Return encrypted string (Cipher String)
+    rect rgba(0, 150, 255, 0.12)
+        Note over GS, Sav: 1. Collect
+        loop For each ISavable
+            GS->>Sav: CaptureData()
+            Sav-->>GS: ISaveData
         end
     end
 
-    rect rgba(0, 200, 100, 0.1)
-        Note over SM, Storage: 3. Write to Disk (I/O)
-        SM->>Storage: WriteAsync(ProfileID, Final String)
-        Note right of Storage: Write to .tmp file<br/>Create .bak backup<br/>Rename to .tdv
-        Storage-->>SM: Confirm successful write
+    rect rgba(255, 165, 0, 0.12)
+        Note over GS, Enc: 2. Encode
+        GS->>Ser: Serialize(SaveData)
+        Ser-->>GS: JSON
+        opt UseEncryption
+            GS->>Enc: Encrypt(JSON)
+            Enc-->>GS: cipher
+        end
     end
-    
-    SM-->>Player: Fire OnSaveDataCompleted Event
+
+    rect rgba(0, 200, 100, 0.12)
+        Note over GS, Store: 3. Persist
+        GS->>Store: WriteAsync(profileId, .sav)
+        Store-->>GS: ok
+        GS->>Store: WriteAsync(profileId, .meta)
+        Store-->>GS: ok
+        Note right of Store: .sav = source of truth (encrypted)<br/>.meta = sidecar cache (plain JSON)<br/>Order matters for stale detection
+    end
+
+    GS-->>Caller: Handle complete
+    GS-->>Caller: Fire OnSaveCompleted(profileId)

@@ -12,7 +12,7 @@ namespace ThanhDV.GameSaver.Core
     /// Aliases must be unique per project and cannot be changed after shipping — doing so breaks existing saves.
     /// </remarks>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false, AllowMultiple = false)]
-    public sealed class SaveDataTypeAttribute : Attribute
+    public sealed class SaveDataAliasAttribute : Attribute
     {
         /// <summary>
         /// Stable string identifier written into the serialized $type field for this type.
@@ -24,7 +24,7 @@ namespace ThanhDV.GameSaver.Core
         /// changing it will prevent old saves from loading.
         /// </param>
         /// <exception cref="ArgumentException">Thrown when alias is null, empty, or whitespace.</exception>
-        public SaveDataTypeAttribute(string alias)
+        public SaveDataAliasAttribute(string alias)
         {
             if (string.IsNullOrWhiteSpace(alias))
             {

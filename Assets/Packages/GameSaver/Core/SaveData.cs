@@ -3,11 +3,17 @@ using System.Collections.Generic;
 namespace ThanhDV.GameSaver.Core
 {
     /// <summary>
-    /// Represents the root container for all saveable object data in the game.
+    /// Root save-file data, including savable objects, SimpleData entries, and metadata.
+    /// Metadata in this file is used if an error occurs while saving the separate .meta file.
     /// </summary>
     [System.Serializable]
     public class SaveData
     {
+        /// <summary>
+        /// Metadata for this save, including profile ID, last-saved time, and custom fields.
+        /// </summary>
+        public ISaveMeta Meta { get; set; }
+
         /// <summary>
         /// Dictionary storing the object data. Each implementation of ISaveData is considered a module.
         /// Must be public for Newtonsoft.Json serialization to work properly.
@@ -30,60 +36,12 @@ namespace ThanhDV.GameSaver.Core
         {
             SaveData clone = new()
             {
+                Meta = Meta,
                 ObjectData = new(ObjectData),
                 SimpleData = new(SimpleData)
             };
 
             return clone;
         }
-
-        /*
-        /// <summary>
-        /// Retrieves a specific data module of type T. Creates a new instance if it doesn't exist.
-        /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
-        /// <returns>The requested data module of type T.</returns>
-        public T GetData<T>(string customKey = null) where T : class, ISaveData, new()
-        {
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
-
-            if (ObjectData.TryGetValue(key, out ISaveData data))
-            {
-                return data as T;
-            }
-
-            // Create a new instance if it doesn't exist
-            T newData = new();
-            ObjectData[key] = newData;
-            return newData;
-        }
-
-        /// <summary>
-        /// Stores or updates a specific data module.
-        /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="data">The data module instance to store.</param>
-        /// <param name="customKey">An optional custom key to identify the data module. Defaults to the type name.</param>
-        public void SetData<T>(T data, string customKey = null) where T : class, ISaveData
-        {
-            if (data == null) return;
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
-
-            ObjectData[key] = data;
-        }
-
-        /// <summary>
-        /// Removes a specific data module from the save data.
-        /// </summary>
-        /// <typeparam name="T">The type of the data module, which must implement ISaveData.</typeparam>
-        /// <param name="customKey">An optional custom key identifying the data module to remove. Defaults to the type name.</param>
-        public void RemoveData<T>(string customKey = null) where T : class, ISaveData
-        {
-            string key = string.IsNullOrEmpty(customKey) ? typeof(T).Name : customKey;
-
-            if (ObjectData.ContainsKey(key)) ObjectData.Remove(key);
-        }
-        */
     }
 }

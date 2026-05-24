@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -58,6 +59,15 @@ namespace ThanhDV.GameSaver.Core
         /// <param name="fileName">The save file name to look for.</param>
         /// <returns><see langword="true"/> if the save file exists; otherwise, <see langword="false"/>.</returns>
         bool Exists(string profileId, string fileName);
+
+        /// <summary>
+        /// Gets the file's last modified time in UTC, or null if it does not exist.
+        /// Used to detect stale metadata when a save succeeds but the related .meta write is interrupted.
+        /// </summary>
+        /// <param name="profileId">The profile identifier that owns the save file.</param>
+        /// <param name="fileName">The target save file name to inspect.</param>
+        /// <returns>The file's last modified UTC time, or <see langword="null"/> if missing.</returns>
+        DateTime? GetLastWriteTimeUtc(string profileId, string fileName);
 
         /// <summary>
         /// Gets all profile identifiers that currently have stored save data.

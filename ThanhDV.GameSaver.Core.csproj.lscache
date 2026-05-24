@@ -65,7 +65,7 @@ Assets/Packages/GameSaver/Core/
  ISerializer.cs
  IStorageProvider.cs
  SaveData.cs
- SaveDataTypeAttribute.cs
+ SaveDataAliasAttribute.cs
  SaveRegistry.cs
  SaveSettings.cs
 Temp/obj/Debug/ThanhDV.GameSaver.Core/.NETStandard,Version=v2.1.AssemblyAttributes.cs

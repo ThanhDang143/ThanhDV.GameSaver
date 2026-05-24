@@ -37,14 +37,14 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             string fullName = typeof(PlainSaveData).FullName;
             Assert.IsTrue(_binder.IsRegistered(fullName),
-                $"Type without [SaveDataType] should be registered with FullName as alias. Expected alias: '{fullName}'.");
+                $"Type without [SaveDataAlias] should be registered with FullName as alias. Expected alias: '{fullName}'.");
         }
 
         [Test]
         public void AutoScan_UsesAttributeAliasWhenPresent()
         {
             Assert.IsTrue(_binder.IsRegistered("Test.SafeTypeBinder.Aliased"),
-                "Type with [SaveDataType] should be registered using the attribute's alias.");
+                "Type with [SaveDataAlias] should be registered using the attribute's alias.");
         }
 
         [Test]
@@ -52,7 +52,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             string fullName = typeof(AliasedSaveData).FullName;
             Assert.IsFalse(_binder.IsRegistered(fullName),
-                "When [SaveDataType] is present, FullName should NOT also be registered as a separate alias.");
+                "When [SaveDataAlias] is present, FullName should NOT also be registered as a separate alias.");
         }
 
         [Test]
@@ -73,15 +73,15 @@ namespace ThanhDV.GameSaver.Tests.Editor
         public void AutoScan_SkipsTypeWithoutInterfaceOrAttribute()
         {
             Assert.IsFalse(_binder.IsRegistered(typeof(UnrelatedPoco)),
-                "Plain POCO without ISaveData / ISaveMeta / [SaveDataType] should not be auto-registered.");
+                "Plain POCO without ISaveData / ISaveMeta / [SaveDataAlias] should not be auto-registered.");
         }
 
         [Test]
         public void AutoScan_DiscoversStandaloneAttributedType()
         {
-            // Has [SaveDataType] but does NOT implement ISaveData — still picked up.
+            // Has [SaveDataAlias] but does NOT implement ISaveData — still picked up.
             Assert.IsTrue(_binder.IsRegistered("Test.SafeTypeBinder.Standalone"),
-                "Type with [SaveDataType] but no interface should still be auto-registered.");
+                "Type with [SaveDataAlias] but no interface should still be auto-registered.");
         }
 
         #endregion
@@ -304,13 +304,13 @@ namespace ThanhDV.GameSaver.Tests.Editor
             public int Value;
         }
 
-        [SaveDataType("Test.SafeTypeBinder.Aliased")]
+        [SaveDataAlias("Test.SafeTypeBinder.Aliased")]
         private class AliasedSaveData : ISaveData
         {
             public int Value;
         }
 
-        [SaveDataType("Test.SafeTypeBinder.Standalone")]
+        [SaveDataAlias("Test.SafeTypeBinder.Standalone")]
         private class StandaloneAttributed
         {
             public int Value;

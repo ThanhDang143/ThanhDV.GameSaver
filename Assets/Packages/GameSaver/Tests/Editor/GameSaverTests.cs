@@ -10,6 +10,7 @@ using ThanhDV.GameSaver.Core;
 using GameSaverRuntime = ThanhDV.GameSaver.Core.GameSaver;
 using UnityEngine;
 using UnityEngine.TestTools;
+using System.Text.RegularExpressions;
 
 namespace ThanhDV.GameSaver.Tests.Editor
 {
@@ -71,18 +72,20 @@ namespace ThanhDV.GameSaver.Tests.Editor
         }
 
         [Test]
-        public void SaveImmediate_WithMetadata_CapturesSavables_WritesSaveAndMetadata_AndUpdatesMetadata()
+        public void SaveImmediate_WithMetadata_CapturesSavables_WritesSaveAndMetadata()
         {
             TestSavable savable = new("player", new TestSaveData { Value = 42 });
             _registry.Register(savable);
-            TestSaveMeta metadata = new();
+            // Caller-supplied metadata is used as-is; lib does not modify ProfileID or LastTimeSaved.
+            DateTime callerTime = new(2025, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+            TestSaveMeta metadata = new() { ProfileID = "profile-1", LastTimeSaved = callerTime };
 
             _gameSaver.SaveImmediate("profile-1", metadata);
 
             Assert.That(savable.CaptureCallCount, Is.EqualTo(1));
-            Assert.That(metadata.ProfileID, Is.EqualTo("profile-1"));
-            Assert.That(metadata.LastTimeSaved, Is.Not.EqualTo(default(DateTime)));
-            Assert.That(_encryption.EncryptInputs, Has.Count.EqualTo(1));
+            Assert.That(metadata.ProfileID, Is.EqualTo("profile-1"), "Caller's ProfileID preserved (lib does not override).");
+            Assert.That(metadata.LastTimeSaved, Is.EqualTo(callerTime), "Caller's LastTimeSaved preserved (lib does not override).");
+            Assert.That(_encryption.EncryptInputs, Has.Count.EqualTo(1), "Only .sav is encrypted; .meta is plain JSON.");
             Assert.That(_storage.WriteImmediateCalls, Has.Count.EqualTo(2));
             Assert.That(_storage.WriteImmediateCalls[0].fileName, Is.Not.EqualTo(_storage.WriteImmediateCalls[1].fileName), "Save data and metadata should be written to separate files.");
         }
@@ -96,8 +99,12 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
             _gameSaver.SaveImmediate("profile-plain");
 
-            Assert.That(_storage.WriteImmediateCalls, Has.Count.EqualTo(1));
-            Assert.That(_storage.WriteImmediateCalls[0].profileId, Is.EqualTo("profile-plain"));
+            // Cluster #7: .meta sidecar is always written (uses DefaultSaveMeta when metadata=null) → 2 writes total.
+            Assert.That(_storage.WriteImmediateCalls, Has.Count.EqualTo(2));
+            Assert.That(_storage.WriteImmediateCalls.Select(c => c.profileId), Is.All.EqualTo("profile-plain"));
+            Assert.That(_storage.WriteImmediateCalls[0].fileName, Is.EqualTo(SaveFileName), "Save data must be written first (source of truth, atomic).");
+            Assert.That(_storage.WriteImmediateCalls[1].fileName, Is.EqualTo(MetaFileName), "Meta sidecar must be written after .sav (meta.mtime >= sav.mtime invariant).");
+            // .sav still encrypted/skipped per setting; .meta is always plain JSON regardless.
             Assert.That(_encryption.EncryptInputs, Is.Empty);
         }
 
@@ -106,14 +113,14 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             TestSavable savable = new("player", new TestSaveData { Value = 10 });
             _registry.Register(savable);
-            TestSaveMeta metadata = new();
+            // Lib trusts caller-supplied metadata as-is — caller pre-fills fields.
+            TestSaveMeta metadata = new() { ProfileID = "profile-async", LastTimeSaved = DateTime.UtcNow };
 
             GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-async", metadata);
             yield return WaitForOperation(handle);
 
             Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
-            Assert.That(_storage.WriteAsyncCalls, Has.Count.EqualTo(2));
-            Assert.That(metadata.ProfileID, Is.EqualTo("profile-async"));
+            Assert.That(_storage.WriteAsyncCalls, Has.Count.EqualTo(2), ".sav + .meta both written.");
         }
 
         [UnityTest]
@@ -252,25 +259,29 @@ namespace ThanhDV.GameSaver.Tests.Editor
         }
 
         [UnityTest]
-        public IEnumerator GetAllMetadataAsync_ReturnsSortedMetadata_AndSkipsInvalidEntries()
+        public IEnumerator GetAllMetadataAsync_ReturnsSortedMetadata_AndSkipsProfilesWithoutSav()
         {
             TestSaveMeta oldMeta = new() { ProfileID = "profile-old", LastTimeSaved = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
             TestSaveMeta newMeta = new() { ProfileID = "profile-new", LastTimeSaved = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
-            string oldSerialized = _serializer.RegisterSerializedValue(oldMeta);
-            string newSerialized = _serializer.RegisterSerializedValue(newMeta);
-            _serializer.RegisterDeserializeException("broken-meta", new FormatException("invalid metadata"));
+            SaveData oldSav = new() { Meta = oldMeta };
+            SaveData newSav = new() { Meta = newMeta };
 
-            _storage.ProfileIds = new List<string> { "profile-old", "profile-broken", "profile-new", "profile-missing" };
-            _storage.SetPrimaryFile("profile-old", MetaFileName, oldSerialized);
-            _storage.SetPrimaryFile("profile-broken", MetaFileName, "broken-meta");
-            _storage.SetPrimaryFile("profile-new", MetaFileName, newSerialized);
+            _storage.ProfileIds = new List<string> { "profile-old", "profile-no-sav", "profile-new", "profile-empty" };
+            _storage.SetPrimaryFile("profile-old", SaveFileName, _serializer.RegisterSerializedValue(oldSav));
+            _storage.SetPrimaryFile("profile-old", MetaFileName, _serializer.RegisterSerializedValue(oldMeta));
+            _storage.SetPrimaryFile("profile-new", SaveFileName, _serializer.RegisterSerializedValue(newSav));
+            _storage.SetPrimaryFile("profile-new", MetaFileName, _serializer.RegisterSerializedValue(newMeta));
+            // profile-no-sav: only .meta (no .sav) — skipped at Exists(SaveName) check.
+            _storage.SetPrimaryFile("profile-no-sav", MetaFileName, _serializer.RegisterSerializedValue(oldMeta));
+            // profile-empty: in ProfileIds but no files at all — skipped.
 
             GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
             yield return WaitForOperation(handle);
             List<TestSaveMeta> result = handle.Result;
 
             Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
-            Assert.That(result.Select(meta => meta.ProfileID).ToArray(), Is.EqualTo(new[] { "profile-new", "profile-old" }));
+            Assert.That(result.Select(meta => meta.ProfileID).ToArray(), Is.EqualTo(new[] { "profile-new", "profile-old" }),
+                "Only profiles with a .sav file are listed, sorted by LastTimeSaved descending.");
         }
 
         [UnityTest]
@@ -532,11 +543,11 @@ namespace ThanhDV.GameSaver.Tests.Editor
             _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
             _storage.HoldWriteAsync();
 
-            // Distinct ProfileID values let us tell which metas the pipeline mutated.
-            // The pipeline overwrites metadata.ProfileID = targetProfile during a save.
-            TestSaveMeta meta1 = new() { ProfileID = "initial-1" };
-            TestSaveMeta meta2 = new() { ProfileID = "initial-2" };
-            TestSaveMeta meta3 = new() { ProfileID = "initial-3" };
+            // Lib trusts caller's metadata as-is (no mutation). Distinct ProfileID values let us
+            // identify which meta object actually got serialized into a .meta sidecar write.
+            TestSaveMeta meta1 = new() { ProfileID = "meta-1" };
+            TestSaveMeta meta2 = new() { ProfileID = "meta-2" };
+            TestSaveMeta meta3 = new() { ProfileID = "meta-3" };
 
             GameSaverOperationHandle h1 = _gameSaver.SaveAsync("profile-meta", meta1);
             yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
@@ -550,12 +561,20 @@ namespace ThanhDV.GameSaver.Tests.Editor
             yield return WaitForOperation(h2);
             yield return WaitForOperation(h3);
 
-            Assert.That(meta1.ProfileID, Is.EqualTo("profile-meta"),
-                "meta1 should have been used by the leading pipeline (its ProfileID got rewritten).");
-            Assert.That(meta2.ProfileID, Is.EqualTo("initial-2"),
-                "meta2 should have been replaced by meta3 (last-wins) and never used by any pipeline.");
-            Assert.That(meta3.ProfileID, Is.EqualTo("profile-meta"),
-                "meta3 should have been used by the trailing pipeline.");
+            // Inspect which TestSaveMeta got serialized into each .meta write.
+            List<string> metaProfileIdsWritten = _storage.WriteAsyncCalls
+                .Where(c => c.fileName == MetaFileName)
+                .Select(c => _serializer.Deserialize<TestSaveMeta>(c.data).ProfileID)
+                .ToList();
+
+            Assert.That(metaProfileIdsWritten, Has.Count.EqualTo(2),
+                "Coalescing produces exactly 2 meta writes: 1 leading + 1 trailing.");
+            Assert.That(metaProfileIdsWritten, Has.Member("meta-1"),
+                "Leading pipeline serialized meta1.");
+            Assert.That(metaProfileIdsWritten, Has.Member("meta-3"),
+                "Trailing pipeline serialized meta3 (last-wins among coalesced).");
+            Assert.That(metaProfileIdsWritten, Has.No.Member("meta-2"),
+                "meta2 was overwritten by meta3 in PendingMetadata before trailing ran — never serialized.");
         }
 
         [UnityTest]
@@ -1269,6 +1288,441 @@ namespace ThanhDV.GameSaver.Tests.Editor
                 "After save completes, the post-capture change remains as unsaved state.");
         }
 
+        // ===================================================================
+        // Cluster #7 — Atomicity .sav/.meta + sidecar cache + mtime self-heal
+        // ===================================================================
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WithoutMetadata_AlwaysWritesMetaSidecar()
+        {
+            // Cluster #7: meta sidecar is always written (uses DefaultSaveMeta if metadata=null).
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-default-meta");
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(_storage.WriteAsyncCalls, Has.Count.EqualTo(2));
+            Assert.That(_storage.WriteAsyncCalls[0].fileName, Is.EqualTo(SaveFileName), ".sav must be written first (source of truth).");
+            Assert.That(_storage.WriteAsyncCalls[1].fileName, Is.EqualTo(MetaFileName), ".meta sidecar must be written after .sav.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WithoutMetadata_WritesDefaultSaveMetaWithLibraryFields()
+        {
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-default-fields");
+            yield return WaitForOperation(handle);
+
+            // Last DefaultSaveMeta seen by the serializer is what was written into the .meta sidecar.
+            DefaultSaveMeta lastMetaWritten = _serializer.GetLastSerializedObject<DefaultSaveMeta>();
+            Assert.That(lastMetaWritten, Is.Not.Null, "Default meta must be serialized when caller passes null.");
+            Assert.That(lastMetaWritten.ProfileID, Is.EqualTo("profile-default-fields"));
+            Assert.That(lastMetaWritten.LastTimeSaved, Is.Not.EqualTo(default(DateTime)),
+                "DefaultSaveMeta.LastTimeSaved must be populated with current UTC time.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WithCustomMetadata_PreservesCallerFieldsAsIs()
+        {
+            // Design philosophy: lib does not mutate caller's metadata. Caller is responsible for
+            // setting ProfileID and LastTimeSaved correctly. If they pass wrong data, that's their bug
+            // (principle of least surprise — what you pass is what gets saved).
+            DateTime callerTime = new(2025, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+            TestSaveMeta provided = new() { ProfileID = "caller-set-id", LastTimeSaved = callerTime };
+
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-target", provided);
+            yield return WaitForOperation(handle);
+
+            Assert.That(provided.ProfileID, Is.EqualTo("caller-set-id"),
+                "Lib must not overwrite caller's ProfileID — even when it mismatches the target profile.");
+            Assert.That(provided.LastTimeSaved, Is.EqualTo(callerTime),
+                "Lib must not overwrite caller's LastTimeSaved.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_EmbedsMetaIntoSaveData_SoSavContainsMetaHeader()
+        {
+            // Caller pre-fills meta (lib doesn't override). Test verifies the .sav serialized output
+            // contains caller's meta inside SaveData.Meta — i.e. cluster #7's single-file design.
+            TestSaveMeta provided = new() { ProfileID = "profile-embed", LastTimeSaved = DateTime.UtcNow };
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("profile-embed", provided);
+            yield return WaitForOperation(handle);
+
+            SaveData savContent = _serializer.GetLastSerializedObject<SaveData>();
+            Assert.That(savContent, Is.Not.Null);
+            Assert.That(savContent.Meta, Is.Not.Null, "SaveData.Meta must be populated before serialize.");
+            Assert.That(savContent.Meta.ProfileID, Is.EqualTo("profile-embed"), "Meta embedded into .sav matches caller's data.");
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_ThenSave_NewMetaReplacesLoadedMeta()
+        {
+            // Pre-write .sav with embedded meta (simulating a prior save session).
+            TestSaveMeta savedMeta = new() { ProfileID = "profile-restore-meta", LastTimeSaved = new DateTime(2025, 6, 1, 0, 0, 0, DateTimeKind.Utc) };
+            SaveData saved = new() { Meta = savedMeta };
+            string serialized = _serializer.RegisterSerializedValue(saved);
+            _storage.SetPrimaryFile("profile-restore-meta", SaveFileName, serialized);
+
+            GameSaverOperationHandle loadHandle = _gameSaver.LoadAsync("profile-restore-meta");
+            yield return WaitForOperation(loadHandle);
+
+            // After Load, re-save with a NEW caller-provided meta. Lib doesn't merge — caller's meta replaces.
+            TestSaveMeta newMeta = new() { ProfileID = "profile-restore-meta", LastTimeSaved = DateTime.UtcNow };
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("profile-restore-meta", newMeta);
+            yield return WaitForOperation(saveHandle);
+
+            // The .sav written must contain newMeta (caller's value), not the loaded savedMeta.
+            SaveData savContent = _serializer.GetLastSerializedObject<SaveData>();
+            Assert.That(savContent.Meta, Is.InstanceOf<TestSaveMeta>());
+            Assert.That(savContent.Meta.ProfileID, Is.EqualTo("profile-restore-meta"));
+            Assert.That(savContent.Meta.LastTimeSaved, Is.Not.EqualTo(savedMeta.LastTimeSaved),
+                "New caller-supplied meta replaces previously loaded meta (α semantics).");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_FreshSidecar_FastPath_DoesNotReadSav()
+        {
+            // Setup: both .sav and .meta written via SetPrimaryFile — .meta written second so meta.mtime > sav.mtime → fresh.
+            TestSaveMeta meta = new() { ProfileID = "profile-fast", LastTimeSaved = DateTime.UtcNow };
+            SaveData sav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-fast", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.SetPrimaryFile("profile-fast", MetaFileName, _serializer.RegisterSerializedValue(meta));
+            _storage.ProfileIds = new List<string> { "profile-fast" };
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(handle.Result, Has.Count.EqualTo(1));
+
+            int savReads = _storage.ReadAsyncCalls.Count(c => c.fileName == SaveFileName);
+            int metaReads = _storage.ReadAsyncCalls.Count(c => c.fileName == MetaFileName);
+            Assert.That(savReads, Is.EqualTo(0), "Fast path must NOT read .sav when sidecar is fresh.");
+            Assert.That(metaReads, Is.EqualTo(1), "Fast path reads .meta sidecar exactly once per profile.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_StaleMeta_RebuildsFromSav()
+        {
+            // Set both files, then simulate post-crash: .sav.mtime newer than .meta.mtime.
+            TestSaveMeta meta = new() { ProfileID = "profile-stale", LastTimeSaved = DateTime.UtcNow };
+            SaveData sav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-stale", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.SetPrimaryFile("profile-stale", MetaFileName, _serializer.RegisterSerializedValue(meta));
+            _storage.SetMtime("profile-stale", MetaFileName, DateTime.UtcNow.AddMinutes(-5));
+            _storage.SetMtime("profile-stale", SaveFileName, DateTime.UtcNow);
+            _storage.ProfileIds = new List<string> { "profile-stale" };
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(handle.Result, Has.Count.EqualTo(1), "Stale-then-rebuild path must still return metadata.");
+
+            int savReads = _storage.ReadAsyncCalls.Count(c => c.fileName == SaveFileName);
+            Assert.That(savReads, Is.EqualTo(1), "Stale path must read .sav to rebuild metadata.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_AfterRebuild_SelfHealsSidecar()
+        {
+            // Setup stale meta — same as previous test.
+            TestSaveMeta meta = new() { ProfileID = "profile-heal", LastTimeSaved = DateTime.UtcNow };
+            SaveData sav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-heal", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.SetPrimaryFile("profile-heal", MetaFileName, _serializer.RegisterSerializedValue(meta));
+            _storage.SetMtime("profile-heal", MetaFileName, DateTime.UtcNow.AddMinutes(-5));
+            _storage.SetMtime("profile-heal", SaveFileName, DateTime.UtcNow);
+            _storage.ProfileIds = new List<string> { "profile-heal" };
+
+            int writesBefore = _storage.WriteAsyncCalls.Count;
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            int writesAfter = _storage.WriteAsyncCalls.Count;
+            int metaWrites = _storage.WriteAsyncCalls.Skip(writesBefore).Count(c => c.fileName == MetaFileName && c.profileId == "profile-heal");
+
+            Assert.That(metaWrites, Is.EqualTo(1), "Self-heal must write a fresh .meta sidecar after rebuilding from .sav.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_MissingMeta_RebuildsFromSav()
+        {
+            // Only .sav exists, no .meta sidecar at all → triggers rebuild.
+            TestSaveMeta meta = new() { ProfileID = "profile-no-meta", LastTimeSaved = DateTime.UtcNow };
+            SaveData sav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-no-meta", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.ProfileIds = new List<string> { "profile-no-meta" };
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Result, Has.Count.EqualTo(1));
+            Assert.That(handle.Result[0].ProfileID, Is.EqualTo("profile-no-meta"));
+            Assert.That(_storage.ReadAsyncCalls.Count(c => c.fileName == SaveFileName), Is.EqualTo(1),
+                "Missing-meta path must read .sav to rebuild.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_CorruptMetaSidecar_FallsThroughToRebuild()
+        {
+            // Bug 2 regression test: with throw; removed from catch, corrupt sidecar must fall through to rebuild.
+            TestSaveMeta meta = new() { ProfileID = "profile-corrupt-meta", LastTimeSaved = DateTime.UtcNow };
+            SaveData sav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-corrupt-meta", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.SetPrimaryFile("profile-corrupt-meta", MetaFileName, "corrupt-json");
+            _serializer.RegisterDeserializeException("corrupt-json", new FormatException("corrupt"));
+            _storage.ProfileIds = new List<string> { "profile-corrupt-meta" };
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded),
+                "Corrupt sidecar must not fail the whole list — should fall through to rebuild from .sav.");
+            Assert.That(handle.Result, Has.Count.EqualTo(1));
+            Assert.That(handle.Result[0].ProfileID, Is.EqualTo("profile-corrupt-meta"));
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_OneCorruptProfile_DoesNotFailOtherProfiles()
+        {
+            // Bug 2 regression test: corruption in one profile must not abort the entire list call.
+            // Profile A: corrupt meta + corrupt sav (truly skipped).
+            _storage.SetPrimaryFile("profile-broken", SaveFileName, "corrupt-sav");
+            _storage.SetPrimaryFile("profile-broken", MetaFileName, "corrupt-meta");
+            _serializer.RegisterDeserializeException("corrupt-sav", new FormatException("bad sav"));
+            _serializer.RegisterDeserializeException("corrupt-meta", new FormatException("bad meta"));
+
+            // Profile B: fully valid.
+            TestSaveMeta goodMeta = new() { ProfileID = "profile-ok", LastTimeSaved = DateTime.UtcNow };
+            SaveData goodSav = new() { Meta = goodMeta };
+            _storage.SetPrimaryFile("profile-ok", SaveFileName, _serializer.RegisterSerializedValue(goodSav));
+            _storage.SetPrimaryFile("profile-ok", MetaFileName, _serializer.RegisterSerializedValue(goodMeta));
+
+            _storage.ProfileIds = new List<string> { "profile-broken", "profile-ok" };
+
+            // Expect warnings/errors logged for the broken profile but no fatal failure.
+            LogAssert.ignoreFailingMessages = true;
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            LogAssert.ignoreFailingMessages = false;
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded),
+                "List call must succeed overall even when one profile is unrecoverable.");
+            Assert.That(handle.Result.Select(m => m.ProfileID), Is.EquivalentTo(new[] { "profile-ok" }),
+                "Valid profiles must still be returned; broken profile silently skipped.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_CorruptSav_FallsBackToSavBackup()
+        {
+            // .sav corrupt, .sav.bak valid → rebuild from backup.
+            TestSaveMeta meta = new() { ProfileID = "profile-bak", LastTimeSaved = DateTime.UtcNow };
+            SaveData backupSav = new() { Meta = meta };
+            _storage.SetPrimaryFile("profile-bak", SaveFileName, "corrupt-primary-sav");
+            _storage.SetBackupFile("profile-bak", SaveFileName, _serializer.RegisterSerializedValue(backupSav));
+            _serializer.RegisterDeserializeException("corrupt-primary-sav", new FormatException("bad primary"));
+            // No .meta sidecar at all → goes straight to rebuild path.
+            _storage.ProfileIds = new List<string> { "profile-bak" };
+
+            LogAssert.ignoreFailingMessages = true;
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+            LogAssert.ignoreFailingMessages = false;
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(handle.Result, Has.Count.EqualTo(1));
+            Assert.That(handle.Result[0].ProfileID, Is.EqualTo("profile-bak"),
+                "When primary .sav fails, lib must fall back to .sav.bak for metadata rebuild.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_BothSavPrimaryAndBackupCorrupt_SkipsProfile()
+        {
+            _storage.SetPrimaryFile("profile-dead", SaveFileName, "corrupt-primary");
+            _storage.SetBackupFile("profile-dead", SaveFileName, "corrupt-backup");
+            _serializer.RegisterDeserializeException("corrupt-primary", new FormatException("bad p"));
+            _serializer.RegisterDeserializeException("corrupt-backup", new FormatException("bad b"));
+            _storage.ProfileIds = new List<string> { "profile-dead" };
+
+            LogAssert.ignoreFailingMessages = true;
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+            LogAssert.ignoreFailingMessages = false;
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(handle.Result, Is.Empty,
+                "When both primary and backup .sav are unreadable, profile is silently skipped from the list.");
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_TypeMismatch_SkipsProfile()
+        {
+            // Profile saved with DefaultSaveMeta but caller queries TestSaveMeta → cast fails → null → skipped.
+            DefaultSaveMeta savedMeta = new("profile-mismatch", DateTime.UtcNow);
+            SaveData sav = new() { Meta = savedMeta };
+            _storage.SetPrimaryFile("profile-mismatch", SaveFileName, _serializer.RegisterSerializedValue(sav));
+            _storage.SetPrimaryFile("profile-mismatch", MetaFileName, _serializer.RegisterSerializedValue(savedMeta));
+            _storage.ProfileIds = new List<string> { "profile-mismatch" };
+
+            // Force rebuild path so the cast goes through saveData.Meta as T.
+            _storage.SetMtime("profile-mismatch", MetaFileName, DateTime.UtcNow.AddMinutes(-5));
+            _storage.SetMtime("profile-mismatch", SaveFileName, DateTime.UtcNow);
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded));
+            Assert.That(handle.Result, Is.Empty,
+                "DefaultSaveMeta is not castable to TestSaveMeta → profile skipped without error.");
+        }
+
+        [Test]
+        public void DefaultSaveMeta_HasParameterlessConstructor()
+        {
+            // Bug 1 regression: Newtonsoft deserialization requires a parameterless ctor.
+            // This test simply asserts the ctor exists and that DefaultSaveMeta is instantiable that way.
+            DefaultSaveMeta meta = new();
+            Assert.That(meta, Is.Not.Null);
+            Assert.That(meta.ProfileID, Is.Null, "Parameterless ctor leaves ProfileID as default.");
+            Assert.That(meta.LastTimeSaved, Is.EqualTo(default(DateTime)), "Parameterless ctor leaves LastTimeSaved as default.");
+        }
+
+        // ===================================================================
+        // Cluster #15 — Clock skew detection (Option C: detect + log warning)
+        // ===================================================================
+
+        [UnityTest]
+        public IEnumerator Save_FirstEverCall_UpdatesLastObservedTimeBaseline()
+        {
+            // Fresh GameSaver — baseline starts at DateTime.MinValue.
+            DateTime beforeSave = DateTime.UtcNow;
+
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("p-baseline");
+            yield return WaitForOperation(handle);
+
+            DateTime baseline = GetPrivateField<DateTime>(_gameSaver, "_lastObservedTime");
+            Assert.That(baseline, Is.GreaterThanOrEqualTo(beforeSave),
+                "After save, _lastObservedTime must reflect the clock time the save was performed at.");
+        }
+
+        [UnityTest]
+        public IEnumerator Save_BaselineInFutureBeyondThreshold_LogsClockSkewWarning()
+        {
+            // Simulate prior observation of a future timestamp (e.g., loaded from a save written
+            // before user manually changed clock back).
+            DateTime futureBaseline = DateTime.UtcNow.AddSeconds(5);
+            SetPrivateField(_gameSaver, "_lastObservedTime", futureBaseline);
+
+            // Lib's next clock read (DateTime.UtcNow) is ~5s less than baseline → trigger warning.
+            LogAssert.Expect(LogType.Log, new Regex(".*Clock moved backward.*"));
+
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("p-skew");
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(GameSaverOperationStatus.Succeeded),
+                "Clock skew warning does NOT fail the save — just logs.");
+        }
+
+        [UnityTest]
+        public IEnumerator Save_BaselineInFutureBelowThreshold_BaselinePreserved()
+        {
+            // Skew of 200ms — below 1s threshold, no warning.
+            DateTime smallSkewBaseline = DateTime.UtcNow.AddMilliseconds(200);
+            SetPrivateField(_gameSaver, "_lastObservedTime", smallSkewBaseline);
+
+            // No LogAssert.Expect — we don't expect any clock skew warning.
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("p-small-skew");
+            yield return WaitForOperation(handle);
+
+            DateTime baselineAfter = GetPrivateField<DateTime>(_gameSaver, "_lastObservedTime");
+            // Since now < baseline, baseline stays at the future value (lib only updates baseline upward).
+            Assert.That(baselineAfter, Is.EqualTo(smallSkewBaseline),
+                "Baseline tracks the max observed; small backward skew (below threshold) keeps baseline unchanged.");
+        }
+
+        [UnityTest]
+        public IEnumerator Load_FutureMetaTimestamp_UpdatesBaselineWithoutWarning()
+        {
+            // Pre-write .sav with meta.LastTimeSaved in the future (could happen if previous session
+            // had a different clock).
+            DateTime futureTime = DateTime.UtcNow.AddHours(1);
+            TestSaveMeta futureMeta = new() { ProfileID = "p-future", LastTimeSaved = futureTime };
+            SaveData saved = new() { Meta = futureMeta };
+            _storage.SetPrimaryFile("p-future", SaveFileName, _serializer.RegisterSerializedValue(saved));
+
+            // Load is "observe external timestamp" semantics — observing past saves is normal,
+            // even if their stored time is in our future. Lib should NOT warn here.
+            GameSaverOperationHandle handle = _gameSaver.LoadAsync("p-future");
+            yield return WaitForOperation(handle);
+
+            DateTime baseline = GetPrivateField<DateTime>(_gameSaver, "_lastObservedTime");
+            Assert.That(baseline, Is.EqualTo(futureTime),
+                "Load must establish baseline from loaded meta's LastTimeSaved, without warning.");
+        }
+
+        [UnityTest]
+        public IEnumerator LoadThenSave_FutureBaselineFromLoad_NextSaveLogsSkewWarning()
+        {
+            // Cross-session scenario: previous session saved with future time; current session
+            // loads (sets baseline to future), then saves → save's UtcNow < baseline → warn.
+            DateTime futureTime = DateTime.UtcNow.AddHours(1);
+            TestSaveMeta futureMeta = new() { ProfileID = "p-cross", LastTimeSaved = futureTime };
+            SaveData saved = new() { Meta = futureMeta };
+            _storage.SetPrimaryFile("p-cross", SaveFileName, _serializer.RegisterSerializedValue(saved));
+
+            GameSaverOperationHandle loadHandle = _gameSaver.LoadAsync("p-cross");
+            yield return WaitForOperation(loadHandle);
+
+            // Now save again — baseline is 1 hour in future, current UtcNow is ~now → skew detected.
+            LogAssert.Expect(LogType.Log, new Regex(".*Clock moved backward.*"));
+
+            GameSaverOperationHandle saveHandle = _gameSaver.SaveAsync("p-cross", new TestSaveMeta { ProfileID = "p-cross", LastTimeSaved = DateTime.UtcNow });
+            yield return WaitForOperation(saveHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator GetAllMetadataAsync_ObservesTimestamps_UpdatesBaselineToMax()
+        {
+            DateTime oldTime = DateTime.UtcNow.AddMinutes(-10);
+            DateTime newestTime = DateTime.UtcNow.AddHours(2);
+
+            TestSaveMeta oldMeta = new() { ProfileID = "p-old", LastTimeSaved = oldTime };
+            TestSaveMeta newMeta = new() { ProfileID = "p-new", LastTimeSaved = newestTime };
+            SaveData oldSav = new() { Meta = oldMeta };
+            SaveData newSav = new() { Meta = newMeta };
+
+            _storage.ProfileIds = new List<string> { "p-old", "p-new" };
+            _storage.SetPrimaryFile("p-old", SaveFileName, _serializer.RegisterSerializedValue(oldSav));
+            _storage.SetPrimaryFile("p-old", MetaFileName, _serializer.RegisterSerializedValue(oldMeta));
+            _storage.SetPrimaryFile("p-new", SaveFileName, _serializer.RegisterSerializedValue(newSav));
+            _storage.SetPrimaryFile("p-new", MetaFileName, _serializer.RegisterSerializedValue(newMeta));
+
+            GameSaverOperationHandle<List<TestSaveMeta>> handle = _gameSaver.GetAllMetadataAsync<TestSaveMeta>();
+            yield return WaitForOperation(handle);
+
+            DateTime baseline = GetPrivateField<DateTime>(_gameSaver, "_lastObservedTime");
+            Assert.That(baseline, Is.EqualTo(newestTime),
+                "ListMetadata must observe all timestamps and set baseline to the max — no false-positive warnings on past times.");
+        }
+
+        [UnityTest]
+        public IEnumerator Save_LargeForwardJump_NoWarning_BaselineMovesForward()
+        {
+            // Simulate clock JUMPING FORWARD (NTP correction after long offline period, daylight saving, etc.).
+            // Forward jump is NOT skew — baseline simply updates upward, no warning.
+            DateTime pastBaseline = DateTime.UtcNow.AddHours(-2);
+            SetPrivateField(_gameSaver, "_lastObservedTime", pastBaseline);
+
+            GameSaverOperationHandle handle = _gameSaver.SaveAsync("p-forward");
+            yield return WaitForOperation(handle);
+
+            DateTime baselineAfter = GetPrivateField<DateTime>(_gameSaver, "_lastObservedTime");
+            Assert.That(baselineAfter, Is.GreaterThan(pastBaseline),
+                "Forward time movement is normal; baseline moves upward without warning.");
+        }
+
         private static (object op, MethodInfo complete, PropertyInfo status, PropertyInfo error) CreateNonGenericOp()
         {
             Type opType = typeof(GameSaverRuntime).Assembly
@@ -1368,6 +1822,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         {
             private readonly Dictionary<(string profileId, string fileName), string> _primaryFiles = new();
             private readonly Dictionary<(string profileId, string fileName), string> _backupFiles = new();
+            private readonly Dictionary<(string profileId, string fileName), DateTime> _mtimes = new();
 
             public readonly List<(string profileId, string fileName, string data)> WriteAsyncCalls = new();
             public readonly List<(string profileId, string fileName, string data)> WriteImmediateCalls = new();
@@ -1423,6 +1878,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
                 {
                     WriteAsyncCalls.Add((profileId, fileName, data));
                     _primaryFiles[(profileId, fileName)] = data;
+                    _mtimes[(profileId, fileName)] = DateTime.UtcNow;
                     if (!ProfileIds.Contains(profileId))
                     {
                         ProfileIds.Add(profileId);
@@ -1434,6 +1890,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             {
                 WriteImmediateCalls.Add((profileId, fileName, data));
                 _primaryFiles[(profileId, fileName)] = data;
+                _mtimes[(profileId, fileName)] = DateTime.UtcNow;
                 if (!ProfileIds.Contains(profileId))
                 {
                     ProfileIds.Add(profileId);
@@ -1472,12 +1929,23 @@ namespace ThanhDV.GameSaver.Tests.Editor
                     _backupFiles.Remove(key);
                 }
 
+                List<(string profileId, string fileName)> mtimeKeys = _mtimes.Keys.Where(key => key.profileId == profileId).ToList();
+                foreach ((string currentProfileId, string fileName) key in mtimeKeys)
+                {
+                    _mtimes.Remove(key);
+                }
+
                 ProfileIds.Remove(profileId);
             }
 
             public bool Exists(string profileId, string fileName)
             {
                 return _primaryFiles.ContainsKey((profileId, fileName));
+            }
+
+            public DateTime? GetLastWriteTimeUtc(string profileId, string fileName)
+            {
+                return _mtimes.TryGetValue((profileId, fileName), out DateTime mtime) ? mtime : (DateTime?)null;
             }
 
             public IEnumerable<string> GetAllProfileIds()
@@ -1498,6 +1966,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             public void SetPrimaryFile(string profileId, string fileName, string data)
             {
                 _primaryFiles[(profileId, fileName)] = data;
+                _mtimes[(profileId, fileName)] = DateTime.UtcNow;
                 if (!ProfileIds.Contains(profileId))
                 {
                     ProfileIds.Add(profileId);
@@ -1511,6 +1980,15 @@ namespace ThanhDV.GameSaver.Tests.Editor
                 {
                     ProfileIds.Add(profileId);
                 }
+            }
+
+            /// <summary>
+            /// Test helper: explicitly set mtime for a file. Used to simulate post-crash scenarios
+            /// where .sav was written after .meta (stale cache).
+            /// </summary>
+            public void SetMtime(string profileId, string fileName, DateTime mtime)
+            {
+                _mtimes[(profileId, fileName)] = mtime;
             }
         }
 
@@ -1579,6 +2057,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
                         ProfileID = metadata.ProfileID,
                         LastTimeSaved = metadata.LastTimeSaved,
                     },
+                    DefaultSaveMeta defaultMeta => new DefaultSaveMeta(defaultMeta.ProfileID, defaultMeta.LastTimeSaved),
                     TestSaveData saveData => new TestSaveData { Value = saveData.Value },
                     _ => value,
                 };
@@ -1586,7 +2065,10 @@ namespace ThanhDV.GameSaver.Tests.Editor
 
             private static SaveData CloneSaveData(SaveData source)
             {
-                SaveData clone = new();
+                SaveData clone = new()
+                {
+                    Meta = (ISaveMeta)CloneObject(source.Meta),
+                };
 
                 foreach (KeyValuePair<string, ISaveData> item in source.ObjectData)
                 {

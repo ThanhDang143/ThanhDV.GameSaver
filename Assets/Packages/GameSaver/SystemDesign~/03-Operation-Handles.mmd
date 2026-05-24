@@ -1,0 +1,105 @@
+---
+config:
+  theme: dark
+id: operation-handles-03
+title: Async Operation Handle Pattern
+---
+classDiagram
+    direction TB
+
+    %% Async operation pattern used by all GameSaver public APIs.
+    %% Public Handle wraps internal mutable state; Awaiter integrates with C# async/await.
+    %% Completion is marshaled back to the captured SynchronizationContext (Unity main thread).
+
+    class GameSaverOperationStatus {
+        <<enumeration>>
+        Pending
+        Succeeded
+        Failed
+    }
+
+    %% --- Non-generic chain ---
+
+    class GameSaverOperationHandle {
+        +bool IsDone
+        +GameSaverOperationStatus Status
+        +float PercentComplete
+        +Exception Error
+        +event Completed
+        +GetAwaiter() GameSaverAwaiter
+    }
+
+    class GameSaverAwaiter {
+        +bool IsCompleted
+        +OnCompleted(Action continuation) void
+        +GetResult() void
+    }
+
+    class GameSaverOperationInternal {
+        -GameSaverOperationStatus Status
+        -float PercentComplete
+        -Exception Error
+        -bool IsDone
+        -SynchronizationContext _capturedContext
+        -event Completed
+        -Action ContinuationAction
+        +Complete(Exception error) void
+    }
+
+    %% --- Generic chain (with Result) ---
+
+    class GameSaverOperationHandle_T {
+        +bool IsDone
+        +GameSaverOperationStatus Status
+        +float PercentComplete
+        +Exception Error
+        +T Result
+        +event Completed
+        +GetAwaiter() GameSaverAwaiter~T~
+    }
+
+    class GameSaverAwaiter_T {
+        +bool IsCompleted
+        +OnCompleted(Action continuation) void
+        +GetResult() T
+    }
+
+    class GameSaverOperationInternal_T {
+        -GameSaverOperationStatus Status
+        -float PercentComplete
+        -Exception Error
+        -T Result
+        -bool IsDone
+        -SynchronizationContext _capturedContext
+        -event Completed
+        -Action ContinuationAction
+        +Complete(T result, Exception error) void
+    }
+
+    class GameSaver {
+        +SaveAsync(...) Handle
+        +LoadAsync(...) Handle
+        +GetAllMetadataAsync~T~() Handle~List~T~~
+        +DeleteProfile(...) void
+        +RestoreBackup(...) void
+    }
+
+    %% Public surface returned by GameSaver APIs.
+    GameSaver --> GameSaverOperationHandle : Save / Load / RestoreBackup return
+    GameSaver --> GameSaverOperationHandle_T : GetAllMetadataAsync~T~ returns
+
+    %% Handle wraps mutable internal state and exposes an awaiter.
+    GameSaverOperationHandle --> GameSaverOperationInternal : wraps
+    GameSaverOperationHandle --> GameSaverAwaiter : awaitable via
+    GameSaverOperationHandle_T --> GameSaverOperationInternal_T : wraps
+    GameSaverOperationHandle_T --> GameSaverAwaiter_T : awaitable via
+
+    %% Status enum tracked by both internal variants.
+    GameSaverOperationInternal --> GameSaverOperationStatus : tracks
+    GameSaverOperationInternal_T --> GameSaverOperationStatus : tracks
+
+    %% Awaiter reads completion state from the wrapped internal.
+    GameSaverAwaiter ..> GameSaverOperationInternal : reads
+    GameSaverAwaiter_T ..> GameSaverOperationInternal_T : reads
+
+    note for GameSaverOperationInternal "Completion callbacks are Post'd back<br/>to the captured SynchronizationContext<br/>so subscribers run on the Unity main thread."

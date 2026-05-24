@@ -39,8 +39,8 @@ namespace ThanhDV.GameSaver.Infrastructure
 
         /// <summary>
         /// Creates a SafeTypeBinder and auto-discovers all types in currently-loaded assemblies that
-        /// implement <see cref="ISaveData"/>, <see cref="ISaveMeta"/>, or carry a <see cref="SaveDataTypeAttribute"/>.
-        /// Each candidate is registered with its <see cref="SaveDataTypeAttribute.Alias"/> when present,
+        /// implement <see cref="ISaveData"/>, <see cref="ISaveMeta"/>, or carry a <see cref="SaveDataAliasAttribute"/>.
+        /// Each candidate is registered with its <see cref="SaveDataAliasAttribute.Alias"/> when present,
         /// otherwise with its <c>Type.FullName</c>.
         /// </summary>
         /// <remarks>
@@ -49,7 +49,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         /// </remarks>
         /// <exception cref="ArgumentException">
         /// Thrown when two distinct types claim the same alias. Fix the conflict — either rename one
-        /// class, change one of the <see cref="SaveDataTypeAttribute"/> values, or move types to different
+        /// class, change one of the <see cref="SaveDataAliasAttribute"/> values, or move types to different
         /// namespaces so their <c>FullName</c> differs.
         /// </exception>
         public SafeTypeBinder()
@@ -142,7 +142,7 @@ namespace ThanhDV.GameSaver.Infrastructure
 
             if (!found)
             {
-                throw new JsonSerializationException($"Type '{serializedType.FullName}' is not registered. Implement ISaveData/ISaveMeta, add [SaveDataType], or call Serializer.Binder.Register<T>().");
+                throw new JsonSerializationException($"Type '{serializedType.FullName}' is not registered. Implement ISaveData/ISaveMeta, add [SaveDataAlias], or call Serializer.Binder.Register<T>().");
             }
 
             assemblyName = null;
@@ -173,7 +173,7 @@ namespace ThanhDV.GameSaver.Infrastructure
                 {
                     result = direct;
                 }
-                // Strategy 2: FullName fallback for legacy saves where [SaveDataType] was added later.
+                // Strategy 2: FullName fallback for legacy saves where [SaveDataAlias] was added later.
                 else
                 {
                     foreach (KeyValuePair<Type, string> tta in _typeToAlias)
@@ -189,7 +189,7 @@ namespace ThanhDV.GameSaver.Infrastructure
 
             if (result != null) return result;
 
-            throw new JsonSerializationException($"SafeTypeBinder cannot deserialize type '{typeName}'. Check: type deleted, renamed without [SaveDataType] update, save from newer build, assembly loaded after construction, or save file was tampered.");
+            throw new JsonSerializationException($"SafeTypeBinder cannot deserialize type '{typeName}'. Check: type deleted, renamed without [SaveDataAlias] update, save from newer build, assembly loaded after construction, or save file was tampered.");
         }
 
         #endregion
@@ -268,7 +268,7 @@ namespace ThanhDV.GameSaver.Infrastructure
         }
 
         /// <summary>
-        /// A type is a candidate iff it is concrete and either implements ISaveData / ISaveMeta or carries [SaveDataType].
+        /// A type is a candidate iff it is concrete and either implements ISaveData / ISaveMeta or carries [SaveDataAlias].
         /// </summary>
         private static bool IsCandidate(Type type)
         {
@@ -278,17 +278,17 @@ namespace ThanhDV.GameSaver.Infrastructure
             if (string.IsNullOrEmpty(type.FullName)) return false;
 
             bool implementsSavable = typeof(ISaveData).IsAssignableFrom(type) || typeof(ISaveMeta).IsAssignableFrom(type);
-            bool hasAttribute = type.GetCustomAttribute<SaveDataTypeAttribute>() != null;
+            bool hasAttribute = type.GetCustomAttribute<SaveDataAliasAttribute>() != null;
 
             return implementsSavable || hasAttribute;
         }
 
         /// <summary>
-        /// Returns the alias declared by [SaveDataType] if present, otherwise <c>Type.FullName</c>.
+        /// Returns the alias declared by [SaveDataAlias] if present, otherwise <c>Type.FullName</c>.
         /// </summary>
         private static string ResolveAlias(Type type)
         {
-            SaveDataTypeAttribute attr = type.GetCustomAttribute<SaveDataTypeAttribute>();
+            SaveDataAliasAttribute attr = type.GetCustomAttribute<SaveDataAliasAttribute>();
             return attr != null ? attr.Alias : type.FullName;
         }
 

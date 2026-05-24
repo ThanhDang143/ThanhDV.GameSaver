@@ -22,6 +22,16 @@ namespace ThanhDV.GameSaver.Core
         private float _autoSaveCountdown;
 
         /// <summary>
+        /// Highest observed UTC time, used to detect backward clock changes.
+        /// </summary>
+        private DateTime _lastObservedTime = DateTime.MinValue;
+
+        /// <summary>
+        /// Minimum backward clock jump that triggers a skew warning.
+        /// </summary>
+        private const double CLOCK_SKEW_THRESHOLD_SECONDS = 1.0;
+
+        /// <summary>
         /// True when unsaved changes exist via SetSimple/DeleteSimple since the last save or load.
         /// Check before profile switches to warn "Save before loading?".
         /// LoadAsync throws when dirty to prevent data loss — use <c>discardUnsavedChanges: true</c> to skip.
@@ -230,6 +240,8 @@ namespace ThanhDV.GameSaver.Core
 
             if (string.IsNullOrEmpty(targetProfile)) throw new InvalidOperationException("Cannot save: No valid ProfileId was provided or found.");
 
+            DateTime now = ReadClockAndCheckSkew($"save '{targetProfile}'");
+            ISaveMeta resolvedMeta = metadata ?? new DefaultSaveMeta(targetProfile, now);
             SaveData snapshot;
             lock (_stateLock)
             {
@@ -242,6 +254,7 @@ namespace ThanhDV.GameSaver.Core
                 saveState.IsSaveImmediate = true;
                 _saveStates[targetProfile] = saveState;
 
+                _curSaveData.Meta = resolvedMeta;
                 CaptureAllSavables();
                 snapshot = _curSaveData.Clone();
                 ClearSimpleDataDirtyFlag();
@@ -254,14 +267,8 @@ namespace ThanhDV.GameSaver.Core
 
                 _storageProvider.WriteImmediate(targetProfile, SaveName, finalData);
 
-                if (metadata != null)
-                {
-                    metadata.ProfileID = targetProfile;
-                    metadata.LastTimeSaved = DateTime.UtcNow;
-
-                    string metaJson = _serializer.Serialize(metadata);
-                    _storageProvider.WriteImmediate(targetProfile, MetaName, metaJson);
-                }
+                string metaJson = _serializer.Serialize(resolvedMeta);
+                _storageProvider.WriteImmediate(targetProfile, MetaName, metaJson);
 
                 if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
 
@@ -461,10 +468,14 @@ namespace ThanhDV.GameSaver.Core
             {
                 internalOp.PercentComplete = 0.1f;
 
+                DateTime now = ReadClockAndCheckSkew($"save '{targetProfile}'");
+                ISaveMeta resolvedMeta = metadata ?? new DefaultSaveMeta(targetProfile, now);
+
                 // Snapshot state under lock; serialization on background threads avoids shared-state corruption.
                 SaveData snapshot;
                 lock (_stateLock)
                 {
+                    _curSaveData.Meta = resolvedMeta;
                     CaptureAllSavables();
                     snapshot = _curSaveData.Clone();
                     ClearSimpleDataDirtyFlag();
@@ -481,14 +492,9 @@ namespace ThanhDV.GameSaver.Core
                 await _storageProvider.WriteAsync(targetProfile, SaveName, finalData).ConfigureAwait(false);
 
                 internalOp.PercentComplete = 0.8f;
-                if (metadata != null)
-                {
-                    metadata.ProfileID = targetProfile;
-                    metadata.LastTimeSaved = DateTime.UtcNow;
 
-                    string metaJson = await Task.Run(() => _serializer.Serialize(metadata)).ConfigureAwait(false);
-                    await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson).ConfigureAwait(false);
-                }
+                string metaJson = await Task.Run(() => _serializer.Serialize(resolvedMeta)).ConfigureAwait(false);
+                await _storageProvider.WriteAsync(targetProfile, MetaName, metaJson).ConfigureAwait(false);
 
                 if (isImplicit) lock (_stateLock) _curProfileId = targetProfile;
 
@@ -558,6 +564,8 @@ namespace ThanhDV.GameSaver.Core
                     restoreSnapshot = _curSaveData.Clone();
                 }
 
+                ObserveExternalTimestamp(loadedData?.Meta?.LastTimeSaved ?? default);
+
                 int objectRegisteredCount = savableSnapshots.Count;
 
                 if (objectRegisteredCount > 0)
@@ -592,9 +600,8 @@ namespace ThanhDV.GameSaver.Core
         }
 
         /// <summary>
-        /// Asynchronously loads and deserializes metadata from all available profiles.
-        /// The resulting collection is sorted by the most recent save time.
-        /// Corrupted or missing metadata files are safely skipped without halting the overall process.
+        /// Asynchronously loads metadata for every available profile, sorted by most recent save time.
+        /// Uses the meta sidecar cache for fast reads; falls back to rebuilding metadata from the save source of truth when the sidecar is missing, stale (post-crash), or corrupted.
         /// </summary>
         /// <typeparam name="T">The concrete metadata type, which must implement <see cref="ISaveMeta"/>.</typeparam>
         /// <param name="internalOp">Operation context to report status, completion, and progress scaling.</param>
@@ -616,37 +623,21 @@ namespace ThanhDV.GameSaver.Core
                 {
                     string profile = profiles[i];
 
-                    if (_storageProvider.Exists(profile, MetaName))
+                    try
                     {
-                        T metadata = null;
+                        if (!_storageProvider.Exists(profile, SaveName)) continue;
 
-                        try
+                        T metadata = await TryLoadMetaAsync<T>(profile).ConfigureAwait(false);
+                        if (metadata != null)
                         {
-                            string metaJson = await _storageProvider.ReadAsync(profile, MetaName);
-                            metadata = await Task.Run(() => _serializer.Deserialize<T>(metaJson));
+                            metadatas.Add(metadata);
+                            ObserveExternalTimestamp(metadata.LastTimeSaved);
                         }
-                        catch (Exception primaryEx)
-                        {
-                            // Intentionally do not throw and try to load backup
-                            DebugLog.Warning($"Primary Metadata file for Profile '{profile}' is corrupted ({primaryEx.Message}). Attempting to load from Backup...");
-
-                            try
-                            {
-                                string backupJson = await _storageProvider.ReadBackupAsync(profile, MetaName);
-                                metadata = await Task.Run(() => _serializer.Deserialize<T>(backupJson));
-
-                                DebugLog.Success($"Successfully loaded Metadata from Backup file for Profile '{profile}'.");
-                            }
-                            catch (Exception backupEx)
-                            {
-                                DebugLog.Error($"Both primary and Backup files for Profile '{profile}' are corrupted ({backupEx.Message}). Skipping this Slot.");
-                            }
-                        }
-
-                        if (metadata != null) metadatas.Add(metadata);
                     }
-
-                    internalOp.PercentComplete = (float)(i + 1) / profileCount;
+                    finally
+                    {
+                        internalOp.PercentComplete = (float)(i + 1) / profileCount;
+                    }
                 }
 
                 // Sort by most recent first
@@ -1027,6 +1018,134 @@ namespace ThanhDV.GameSaver.Core
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Reads save (or its backup), decrypts, deserializes, and extracts the embedded <see cref="ISaveMeta"/>. 
+        /// Returns null when the file is missing, corrupted, or its meta is not castable to <typeparamref name="T"/>.
+        /// </summary>
+        private async Task<T> TryRebuildMetaAsync<T>(string profile, bool useBackup) where T : class, ISaveMeta
+        {
+            try
+            {
+                string rawData = useBackup ? await _storageProvider.ReadBackupAsync(profile, SaveName).ConfigureAwait(false) : await _storageProvider.ReadAsync(profile, SaveName).ConfigureAwait(false);
+
+                SaveData saveData = await Task.Run(() =>
+                {
+                    string plain = _settings.UseEncryption ? _encryptionProvider.Decrypt(rawData) : rawData;
+                    return _serializer.Deserialize<SaveData>(plain);
+                }).ConfigureAwait(false);
+
+                return saveData?.Meta as T;
+            }
+            catch (Exception e)
+            {
+                string label = useBackup ? "Backup" : "Primary";
+                DebugLog.Warning($"{label} save for profile '{profile}' could not be read for metadata rebuild ({e.Message}).");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Resolves metadata for a single profile. Tries read meta when the sidecar is fresh per mtime; otherwise rebuilds from save and self-heals the sidecar.
+        /// </summary>
+        private async Task<T> TryLoadMetaAsync<T>(string profile) where T : class, ISaveMeta
+        {
+            DateTime? metaMtime = _storageProvider.GetLastWriteTimeUtc(profile, MetaName);
+            DateTime? saveMtime = _storageProvider.GetLastWriteTimeUtc(profile, SaveName);
+            bool isMetaValid = metaMtime.HasValue && saveMtime.HasValue && metaMtime.Value >= saveMtime.Value;
+
+            if (isMetaValid)
+            {
+                try
+                {
+                    string metaJson = await _storageProvider.ReadAsync(profile, MetaName).ConfigureAwait(false);
+                    return await Task.Run(() => _serializer.Deserialize<T>(metaJson)).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    DebugLog.Warning($"Metadata of profile '{profile}' is corrupted ({e.Message}). Try rebuilding from save.");
+                }
+            }
+
+            T metadata = await TryRebuildMetaAsync<T>(profile, false).ConfigureAwait(false);
+            bool isFromBackup = false;
+            if (metadata == null)
+            {
+                metadata = await TryRebuildMetaAsync<T>(profile, true).ConfigureAwait(false);
+                isFromBackup = true;
+            }
+
+            if (metadata != null)
+            {
+                try
+                {
+                    string metaJson = await Task.Run(() => _serializer.Serialize(metadata)).ConfigureAwait(false);
+                    await _storageProvider.WriteAsync(profile, MetaName, metaJson).ConfigureAwait(false);
+
+                    if (isFromBackup) DebugLog.Success($"Rebuilt metadata from Backup save of profile '{profile}'.");
+                }
+                catch (Exception healEx)
+                {
+                    DebugLog.Warning($"Failed to write self-healed metadata for profile '{profile}': {healEx.Message}");
+                }
+            }
+            else
+            {
+                DebugLog.Error($"Both Primary and Backup save of profile '{profile}' are corrupted. Skipping this Slot.");
+            }
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Returns the current UTC time and warns if the clock moved backward too far.
+        /// </summary>
+        /// <param name="context">Label included in the warning for debugging.</param>
+        /// <returns>The current UTC time.</returns>
+        private DateTime ReadClockAndCheckSkew(string context)
+        {
+            DateTime now = DateTime.UtcNow;
+            DateTime prev = DateTime.MinValue;
+            bool warn = false;
+            TimeSpan delta;
+
+            lock (_stateLock)
+            {
+                prev = _lastObservedTime;
+                if (prev == DateTime.MinValue)
+                {
+                    warn = false;
+                    delta = TimeSpan.Zero;
+                }
+                else
+                {
+                    delta = prev - now;
+                    warn = delta.TotalSeconds > CLOCK_SKEW_THRESHOLD_SECONDS;
+                }
+
+                if (now > _lastObservedTime) _lastObservedTime = now;
+            }
+
+            if (warn)
+            {
+                DebugLog.Warning($"Clock moved backward ({context}) by {delta.TotalSeconds:0.0}s (from {prev:O} to {now:O}). Save ordering may be inconsistent.");
+            }
+
+            return now;
+        }
+
+        /// <summary>
+        /// Observes a timestamp from an external source (loaded save metadata) to update the clock baseline.
+        /// </summary>
+        private void ObserveExternalTimestamp(DateTime time)
+        {
+            if (time == default) return;
+
+            lock (_stateLock)
+            {
+                if (time > _lastObservedTime) _lastObservedTime = time;
+            }
         }
 
         /// <summary>

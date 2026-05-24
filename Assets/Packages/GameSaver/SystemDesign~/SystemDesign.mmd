@@ -1,245 +1,32 @@
 ---
 config:
   theme: dark
-id: a2b2e2a4-97a9-411c-934f-6bb96bb3fbb2
+id: index-00
+title: GameSaver System Design — Index
 ---
-classDiagram
-    %% --- CORE ---
-    namespace Core {
-        class ISavable {
-            <<interface>>
-            +string SaveKey
-            +CaptureData() ISaveData
-            +RestoreData(ISaveData data) void
-        }
+%% The full system design has been split into 4 focused diagrams to reduce edge crossing.
+%% Open the individual .mmd files in this folder for each concern.
+%%
+%%   01-Architecture-Overview.mmd     High-level layered view (contracts, core, services)
+%%   02-Save-Load-Pipeline.mmd        Runtime flow: register → capture → write / read → restore
+%%   03-Operation-Handles.mmd         Async handle + awaiter pattern
+%%   04-Serialization-Storage.mmd     Infrastructure layer (JSON binder, file storage, AES)
+%%
+%% Render any of them with Mermaid Live Editor, VS Code Mermaid extension,
+%% or any tool supporting `.mmd` files.
 
-        class ISaveData {
-            <<interface>>
-        }
+flowchart TB
+    A["01 — Architecture Overview<br/>contracts • core • services"]
+    B["02 — Save/Load Pipeline<br/>GameSaver runtime flow"]
+    C["03 — Operation Handles<br/>async handle pattern"]
+    D["04 — Serialization & Storage<br/>infrastructure layer"]
 
-        class ISaveMeta {
-            <<interface>>
-            +string ProfileID
-            +DateTime LastTimeSaved
-        }
+    A --> B
+    A --> D
+    B --> C
+    B --> D
 
-        class ISerializer {
-            <<interface>>
-            +Serialize~T~(T obj) string
-            +Deserialize~T~(string data) T
-        }
-
-        class IStorageProvider {
-            <<interface>>
-            +WriteAsync(string profileId, string fileName, string data) Task
-            +WriteImmediate(string profileId, string fileName, string data) void
-            +RestoreBackup(string profileId, string fileName) void
-            +ReadAsync(string profileId, string fileName) Task~string~
-            +ReadBackupAsync(string profileId, string fileName) Task~string~
-            +DeleteProfile(string profileId) void
-            +Exists(string profileId, string fileName) bool
-            +GetAllProfileIds() IEnumerable~string~
-            +GetMostRecentProfileId() string
-        }
-
-        class IEncryptionProvider {
-            <<interface>>
-            +Encrypt(string plainText) string
-            +Decrypt(string cipherText) string
-        }
-
-        class SaveSettings {
-            <<ScriptableObject>>
-            +bool CreateProfileIfNull
-            +bool UseEncryption
-            +string FileName
-            +string SaveExtension
-            +string MetaExtension
-            +bool EnableAutoSave
-            +float AutoSaveTime
-        }
-
-        class SaveData {
-            +Dictionary~string, ISaveData~ ObjectData
-            +GetData~T~(string customKey = null) T
-            +SetData~T~(T data, string customKey = null) void
-            +RemoveData~T~(string customKey = null) void
-        }
-
-        class SaveRegistry {
-            -HashSet~ISavable~ _savables
-            +IEnumerable~ISavable~ Savables
-            +Action~ISavable~ OnSavableRegistered
-            +Action~ISavable~ OnSavableUnregistered
-            +Register(ISavable savable) void
-            +Unregister(ISavable savable) void
-        }
-
-        class GameSaver {
-            -SaveRegistry _registry
-            -IStorageProvider _storageProvider
-            -ISerializer _serializer
-            -IEncryptionProvider _encryptionProvider
-            -SaveSettings _settings
-            -SaveData _curSaveData
-            -string _curProfileId
-            -string MetaName
-            -string SaveName
-            +GameSaver(SaveRegistry registry, IStorageProvider storageProvider, ISerializer serializer, IEncryptionProvider encryptionProvider, SaveSettings settings)
-            +GetAllMetadataAsync~T~() GameSaverOperationHandle~List<T>~
-            +GetMostRecentProfileId() string
-            +GetAllProfiles() IEnumerable~string~
-            +DeleteProfile(string profileId) void
-            +SaveAsync(string profileId = null, ISaveMeta metadata = null) GameSaverOperationHandle
-            +SaveImmediate(string profileId = null, ISaveMeta metadata = null) void
-            +RestoreBackup(string profileId) void
-            +LoadAsync(string profileId) GameSaverOperationHandle
-            +LoadBackupAsync(string profileId) GameSaverOperationHandle
-            +LoadMostRecentAsync() GameSaverOperationHandle
-            +Dispose() void
-        }
-    }
-
-    %% --- OPERATION ---
-    namespace Operation {
-        class GameSaverOperationStatus {
-            <<enumeration>>
-            Pending
-            Succeeded
-            Failed
-        }
-
-        class GameSaverOperationHandle {
-            +bool IsDone
-            +GameSaverOperationStatus Status
-            +float PercentComplete
-            +Exception Error
-            +Action~GameSaverOperationHandle~ Completed
-            +GetAwaiter() GameSaverAwaiter
-        }
-
-        class GameSaverOperationHandle~T~ {
-            +bool IsDone
-            +GameSaverOperationStatus Status
-            +float PercentComplete
-            +Exception Error
-            +T Result
-            +Action~GameSaverOperationHandle~T~~ Completed
-            +GetAwaiter() GameSaverAwaiter~T~
-        }
-
-        class GameSaverAwaiter {
-            +bool IsCompleted
-            +OnCompleted(Action continuation) void
-            +GetResult() void
-        }
-
-        class GameSaverAwaiter~T~ {
-            +bool IsCompleted
-            +OnCompleted(Action continuation) void
-            +GetResult() T
-        }
-
-        class GameSaverOperationInternal {
-            -GameSaverOperationStatus Status
-            -float PercentComplete
-            -Exception Error
-            -bool IsDone
-            -Action~GameSaverOperationHandle~ Completed
-            -Action ContinuationAction
-            +Complete(Exception error = null) void
-        }
-
-        class GameSaverOperationInternal~T~ {
-            -GameSaverOperationStatus Status
-            -float PercentComplete
-            -Exception Error
-            -T Result
-            -bool IsDone
-            -Action~GameSaverOperationHandle~T~~ Completed
-            -Action ContinuationAction
-            +Complete(T result, Exception error = null) void
-        }
-    }
-
-    %% --- INFRASTRUCTURE ---
-    namespace Infrastructure {
-        class JsonSerializer {
-            -JsonSerializerSettings _settings
-            +JsonSerializer()
-            +Serialize~T~(T obj) string
-            +Deserialize~T~(string data) T
-        }
-
-        class LocalStorageProvider {
-            -string _basePath
-            +LocalStorageProvider(string basePath)
-            +WriteAsync(string profileId, string fileName, string data) Task
-            +WriteImmediate(string profileId, string fileName, string data) void
-            -WriteToFileAsync(string fullPath, string data) Task
-            -WriteToFileImmediate(string fullPath, string data) void
-            -SafeReplace(string originalPath, string tempPath, string backupPath) void
-            +RestoreBackup(string profileId, string fileName) void
-            +ReadAsync(string profileId, string fileName) Task~string~
-            +ReadBackupAsync(string profileId, string fileName) Task~string~
-            +DeleteProfile(string profileId) void
-            +GetAllProfileIds() IEnumerable~string~
-            +GetMostRecentProfileId() string
-            +Exists(string profileId, string fileName) bool
-            -GetFullPath(string profileId, string fileName) string
-            -PrepareDirectory(string fullPath) void
-            -ValidateProfileId(string profileId) void
-        }
-
-        class AESProvider {
-            -byte[] _keyBytes
-            +AESProvider(string secretKey)
-            +Encrypt(string plainText) string
-            +Decrypt(string cipherText) string
-            -DeriveKey(string secretKey) byte[]
-        }
-    }
-
-    %% --- GAME IMPLEMENTATION ---
-    namespace GameImplementation {
-        class CustomSaveData {
-            <<user defined>>
-            +int Health
-            +int Gold
-        }
-
-        class CustomSaveMeta {
-            <<user defined>>
-            +string ProfileID
-            +DateTime LastTimeSaved
-            +string DisplayName
-        }
-    }
-
-    %% --- RELATIONSHIPS ---
-    SaveRegistry "1" *-- "*" ISavable : tracks
-    SaveData o-- ISaveData : stores object
-    ISavable ..> ISaveData : capture/restore
-    CustomSaveData ..|> ISaveData : implements
-    CustomSaveMeta ..|> ISaveMeta : implements
-
-    GameSaver --> SaveData : owns active state
-    GameSaver ..> SaveRegistry : subscribes to events
-    GameSaver ..> IStorageProvider : persists files
-    GameSaver ..> ISerializer : serializes payloads
-    GameSaver ..> IEncryptionProvider : encrypts save data
-    GameSaver ..> SaveSettings : reads configuration
-    GameSaver ..> ISaveMeta : updates metadata on save
-
-    JsonSerializer ..|> ISerializer : implements
-    LocalStorageProvider ..|> IStorageProvider : implements
-    AESProvider ..|> IEncryptionProvider : implements
-
-    GameSaver --> GameSaverOperationHandle : returns
-    GameSaver --> GameSaverOperationHandle~T~ : returns
-    GameSaverOperationHandle ..> GameSaverAwaiter : awaitable via
-    GameSaverOperationHandle~T~ ..> GameSaverAwaiter~T~ : awaitable via
-    GameSaverOperationHandle ..> GameSaverOperationInternal : wraps
-    GameSaverOperationHandle~T~ ..> GameSaverOperationInternal~T~ : wraps
-    GameSaverOperationInternal --> GameSaverOperationStatus : tracks
-    GameSaverOperationInternal~T~ --> GameSaverOperationStatus : tracks
+    style A fill:#2d4a2d,stroke:#5a8a5a
+    style B fill:#2d3d5a,stroke:#5a7aaa
+    style C fill:#5a3d2d,stroke:#aa7a5a
+    style D fill:#3d2d4a,stroke:#7a5aaa

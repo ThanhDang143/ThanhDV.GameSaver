@@ -107,9 +107,9 @@ namespace ThanhDV.GameSaver.Tests.Editor
         }
 
         [Test]
-        public void Serialize_TypeWithSaveDataTypeAttribute_UsesAlias()
+        public void Serialize_TypeWithSaveDataAliasAttribute_UsesAlias()
         {
-            // MagicSword has [SaveDataType("Test.JsonSerializer.MagicSword")] — that exact string must appear in $type.
+            // MagicSword has [SaveDataAlias("Test.JsonSerializer.MagicSword")] — that exact string must appear in $type.
             var list = new List<BaseItem> { new MagicSword { Power = 99 } };
             string json = _serializer.Serialize(list);
 
@@ -121,7 +121,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         [Test]
         public void Serialize_TypeWithoutAttribute_UsesFullNameAsAlias()
         {
-            // Item has no [SaveDataType] — its alias is Type.FullName.
+            // Item has no [SaveDataAlias] — its alias is Type.FullName.
             var list = new List<BaseItem> { new Item { Name = "X" } };
             string json = _serializer.Serialize(list);
 
@@ -190,7 +190,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
         [Test]
         public void Deserialize_LegacyAQNFormat_TypeWithAttribute_LoadsViaFullNameFallback()
         {
-            // Strategy 2: type has [SaveDataType("…")] so alias != FullName.
+            // Strategy 2: type has [SaveDataAlias("…")] so alias != FullName.
             // Legacy save still encodes FullName in $type — the binder falls back by scanning
             // registered types for one whose FullName matches.
             string fullName = typeof(MagicSword).FullName;
@@ -457,7 +457,7 @@ namespace ThanhDV.GameSaver.Tests.Editor
             public int Damage;
         }
 
-        [SaveDataType("Test.JsonSerializer.MagicSword")]
+        [SaveDataAlias("Test.JsonSerializer.MagicSword")]
         private class MagicSword : BaseItem
         {
             public int Power;

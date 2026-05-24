@@ -67,7 +67,7 @@ namespace ThanhDV.GameSaver.Infrastructure
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error writing data to file '{fullPath}': {e}");
+                DebugLog.Error($"Error writing data to file '{DebugLog.SanitizePath(fullPath)}': {DebugLog.SanitizeException(e)}");
                 throw;
             }
             finally
@@ -94,7 +94,7 @@ namespace ThanhDV.GameSaver.Infrastructure
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error writing data to file '{fullPath}': {e}");
+                DebugLog.Error($"Error writing data to file '{DebugLog.SanitizePath(fullPath)}': {DebugLog.SanitizeException(e)}");
                 throw;
             }
             finally
@@ -275,6 +275,22 @@ namespace ThanhDV.GameSaver.Infrastructure
 
             string fullPath = GetFullPath(profileId, fileName);
             return File.Exists(fullPath) || File.Exists(fullPath + Constant.FILE_BACKUP_EXTENTION);
+        }
+
+        /// <summary>
+        /// Returns the UTC modification time of the file specified by <paramref name="fileName"/>, or null if the file does not exist.
+        /// </summary>
+        /// <param name="profileId">The profile ID.</param>
+        /// <param name="fileName">The target save file name to inspect.</param>
+        /// <returns>UTC <see cref="DateTime"/> of last content modification, or null when missing.</returns>
+        public DateTime? GetLastWriteTimeUtc(string profileId, string fileName)
+        {
+            ValidateProfileId(profileId);
+
+            string fullPath = GetFullPath(profileId, fileName);
+            if (!File.Exists(fullPath)) return null;
+
+            return File.GetLastWriteTimeUtc(fullPath);
         }
 
         #endregion

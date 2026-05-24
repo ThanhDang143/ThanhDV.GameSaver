@@ -1,0 +1,107 @@
+---
+config:
+  theme: dark
+id: serialization-storage-04
+title: Infrastructure Layer (Serialization, Storage, Encryption)
+---
+classDiagram
+    direction TB
+
+    %% Concrete implementations of the service abstractions, plus the type-binder
+    %% safety net for JSON deserialization and the cross-layer logging utility.
+
+    namespace ServiceAbstractions {
+        class ISerializer {
+            <<interface>>
+            +Serialize~T~(T) string
+            +Deserialize~T~(string) T
+        }
+
+        class IStorageProvider {
+            <<interface>>
+            +WriteAsync(...) Task
+            +ReadAsync(...) Task~string~
+            +Exists(...) bool
+            +GetLastWriteTimeUtc(...) DateTime?
+            +DeleteProfile(...) void
+        }
+
+        class IEncryptionProvider {
+            <<interface>>
+            +Encrypt(string) string
+            +Decrypt(string) string
+        }
+    }
+
+    namespace Infrastructure {
+        class JsonSerializer {
+            -JsonSerializerSettings _settings
+            -SafeTypeBinder _binder
+            +SafeTypeBinder Binder
+            +Serialize~T~(T) string
+            +Deserialize~T~(string) T
+        }
+
+        class SafeTypeBinder {
+            <<ISerializationBinder>>
+            -Dictionary~string, Type~ _aliasToType
+            -Dictionary~Type, string~ _typeToAlias
+            +Register~T~(string alias) void
+            +BindToName(...) void
+            +BindToType(...) Type
+        }
+
+        class SaveDataAliasAttribute {
+            <<Attribute>>
+            +string Alias
+        }
+
+        class LocalStorageProvider {
+            -string _basePath
+            +WriteAsync(...) Task
+            +ReadAsync(...) Task~string~
+            +GetLastWriteTimeUtc(...) DateTime?
+            +DeleteProfile(...) void
+            +Exists(...) bool
+        }
+
+        class AESProvider {
+            -KeyMaterial _material
+            +Encrypt(string) string
+            +Decrypt(string) string
+        }
+    }
+
+    namespace Common {
+        class DebugLog {
+            <<static>>
+            +Log(string)$
+            +Success(string)$
+            +Warning(string)
+            +Error(string)
+            +SanitizePath(string) string$
+            +SanitizeException(Exception) string$
+        }
+    }
+
+    %% Implementation relationships.
+    JsonSerializer ..|> ISerializer : implements
+    LocalStorageProvider ..|> IStorageProvider : implements
+    AESProvider ..|> IEncryptionProvider : implements
+
+    %% Type-binder integration with serializer.
+    JsonSerializer *-- SafeTypeBinder : composes (auto-scan on init)
+    SafeTypeBinder ..> SaveDataAliasAttribute : reads aliases
+
+    %% Logging usage (utility cross-cuts the layer).
+    LocalStorageProvider ..> DebugLog : logs
+    AESProvider ..> DebugLog : logs
+    SafeTypeBinder ..> DebugLog : logs
+
+    note for SafeTypeBinder "Whitelist-based binder.<br/>Auto-scans loaded assemblies for<br/>ISaveData / ISaveMeta / [SaveDataAlias].<br/>Blocks type-injection attacks (RCE)<br/>and survives class renames."
+
+    note for LocalStorageProvider "Atomic write via temp+rename.<br/>Path-traversal validation.<br/>PlatformNotSupportedException<br/>on WebGL / console — user must<br/>supply custom IStorageProvider."
+
+    note for AESProvider "AES-256-CBC + HMAC-SHA256<br/>(Encrypt-then-MAC).<br/>Two-key derivation via HMAC KDF.<br/>Constant-time tag comparison."
+
+    note for DebugLog "Log / Success: stripped in non-Editor builds.<br/>Warning / Error: always on.<br/>SanitizePath / SanitizeException:<br/>return basename / .Message in builds<br/>to avoid leaking PII via crash reporters."
