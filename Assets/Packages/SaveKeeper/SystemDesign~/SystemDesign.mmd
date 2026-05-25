@@ -1,0 +1,32 @@
+---
+config:
+  theme: dark
+id: index-00
+title: SaveKeeper System Design — Index
+---
+%% The full system design has been split into 4 focused diagrams to reduce edge crossing.
+%% Open the individual .mmd files in this folder for each concern.
+%%
+%%   01-Architecture-Overview.mmd     High-level layered view (contracts, core, services)
+%%   02-Save-Load-Pipeline.mmd        Runtime flow: register → capture → write / read → restore
+%%   03-Operation-Handles.mmd         Async handle + awaiter pattern
+%%   04-Serialization-Storage.mmd     Infrastructure layer (JSON binder, file storage, AES)
+%%
+%% Render any of them with Mermaid Live Editor, VS Code Mermaid extension,
+%% or any tool supporting `.mmd` files.
+
+flowchart TB
+    A["01 — Architecture Overview<br/>contracts • core • services"]
+    B["02 — Save/Load Pipeline<br/>SaveKeeper runtime flow"]
+    C["03 — Operation Handles<br/>async handle pattern"]
+    D["04 — Serialization & Storage<br/>infrastructure layer"]
+
+    A --> B
+    A --> D
+    B --> C
+    B --> D
+
+    style A fill:#2d4a2d,stroke:#5a8a5a
+    style B fill:#2d3d5a,stroke:#5a7aaa
+    style C fill:#5a3d2d,stroke:#aa7a5a
+    style D fill:#3d2d4a,stroke:#7a5aaa

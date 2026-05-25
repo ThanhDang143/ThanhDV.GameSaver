@@ -1,0 +1,14 @@
+{
+    "name": "ThanhDV.SaveKeeper.Common",
+    "rootNamespace": "ThanhDV.SaveKeeper.Common",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

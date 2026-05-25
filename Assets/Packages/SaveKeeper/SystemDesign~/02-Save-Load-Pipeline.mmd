@@ -1,0 +1,113 @@
+---
+config:
+  theme: dark
+id: save-load-pipeline-02
+title: SaveKeeper Save/Load Pipeline
+---
+classDiagram
+    direction LR
+
+    %% Focuses on the runtime flow: registration, save (capture → serialize → encrypt → write),
+    %% load (read → decrypt → deserialize → restore), plus auto-save and dirty tracking.
+
+    class SaveKeeper {
+        -SaveRegistry _registry
+        -SaveData _curSaveData
+        -string _curProfileId
+        -bool _isSimpleDataDirty
+        -DateTime _lastObservedTime
+        -Dictionary _saveStates
+        -object _stateLock
+        -SynchronizationContext _capturedContext
+        +bool IsSimpleDataDirty
+        +event OnSaveCompleted
+        +SaveAsync(profileId, metadata) Handle
+        +SaveImmediate(profileId, metadata) void
+        +LoadAsync(profileId, discardUnsavedChanges) Handle
+        +LoadBackupAsync(profileId, discardUnsavedChanges) Handle
+        +LoadMostRecentAsync(discardUnsavedChanges) Handle
+        +GetAllMetadataAsync~T~() Handle~List~T~~
+        +DeleteProfile(profileId) void
+        +RestoreBackup(profileId) void
+        +WaitForPendingOperationsAsync() Task
+        +SetSimple~T~(key, value) void
+        +GetSimple~T~(key, defaultValue) T
+        +HasSimpleKey(key) bool
+        +DeleteSimple(key) void
+    }
+
+    class SaveRegistry {
+        -Dictionary~string, ISavable~ _savables
+        -object _lock
+        +IReadOnlyList~ISavable~ Savables
+        +event OnSavableRegistered
+        +event OnSavableUnregistered
+        +Register(savable) void
+        +Unregister(savable) void
+    }
+
+    class ISavable {
+        <<interface>>
+        +string SaveKey
+        +CaptureData() ISaveData
+        +RestoreData(ISaveData) void
+    }
+
+    class SaveData {
+        +ISaveMeta Meta
+        +Dictionary~string, ISaveData~ ObjectData
+        +Dictionary~string, string~ SimpleData
+        +Clone() SaveData
+    }
+
+    class ISaveMeta {
+        <<interface>>
+        +string ProfileID
+        +DateTime LastTimeSaved
+    }
+
+    class DefaultSaveMeta {
+        +string ProfileID
+        +DateTime LastTimeSaved
+    }
+
+    class DuplicateSaveKeyException {
+        <<InvalidOperationException>>
+        +string SaveKey
+        +Type ExistingType
+        +Type IncomingType
+    }
+
+    class AutoSaveTicker {
+        <<static>>
+        +Subscribe(SaveKeeper) void
+        +Unsubscribe(SaveKeeper) void
+    }
+
+    class SaveSettings {
+        <<ScriptableObject>>
+        +bool EnableAutoSave
+        +float AutoSaveTime
+        +bool AutoSaveOnQuit
+        +int AutoSaveOnQuitTimeout
+        +bool UseEncryption
+        +string FileName
+    }
+
+    %% Registration pipeline.
+    SaveRegistry "1" *-- "*" ISavable : tracks
+    SaveRegistry ..> DuplicateSaveKeyException : throws on collision
+
+    %% Save/Load pipeline core.
+    SaveKeeper --> SaveRegistry : observes events
+    SaveKeeper --> SaveData : owns active state
+    SaveKeeper ..> ISaveMeta : reads caller-supplied
+    SaveKeeper ..> DefaultSaveMeta : fallback when null
+    SaveKeeper ..> SaveSettings : configuration
+
+    %% SaveData composition.
+    SaveData o-- ISaveMeta : embedded meta header
+    DefaultSaveMeta ..|> ISaveMeta : implements
+
+    %% Auto-save integration.
+    AutoSaveTicker --> SaveKeeper : ticks each frame

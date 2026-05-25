@@ -1,4 +1,4 @@
-# GameSaver
+# SaveKeeper
 
 A lightweight save system for Unity featuring:
 
@@ -13,7 +13,7 @@ A lightweight save system for Unity featuring:
 ### Unity Package Manager (via Git URL)
 
 ```
-https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/GameSaver
+https://github.com/ThanhDang143/ThanhDV.SaveKeeper.git?path=/Assets/Packages/SaveKeeper
 ```
 
 1. In Unity, open **Window** → **Package Manager**.
@@ -30,7 +30,7 @@ https://github.com/ThanhDang143/ThanhDV.GameSaver.git?path=/Assets/Packages/Game
 
 2. In Unity, open **Window** → **Package Manager**.
 
-- Press the **+** button, choose "**Add package by name...**" → `thanhdv.gamesaver`
+- Press the **+** button, choose "**Add package by name...**" → `thanhdv.savekeeper`
 - or
 - Press the **Packages** button, choose "**My Registries**"
 

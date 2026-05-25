@@ -1,0 +1,29 @@
+{
+    "name": "thanhdv.savekeeper",
+    "version": "1.0.0",
+    "displayName": "SaveKeeper",
+    "description": "A professional save game library for Unity. Async/sync APIs, multi-profile slots, rename-safe type identity.",
+    "unity": "2022.3",
+    "testables": [
+        "ThanhDV.SaveKeeper.Tests.Editor"
+    ],
+    "keywords": [
+        "SaveSystem",
+        "Save",
+        "Load"
+    ],
+    "author": {
+        "name": "ThanhDV",
+        "email": "vanthanh1998@gmail.com",
+        "url": "https://knowledge.thanhdv.com/"
+    },
+    "dependencies": {
+        "thanhdv.fork.newtonsoft-json": "3.2.2"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ThanhDV143/ThanhDV.Lib.SaveKeeper.git"
+    },
+    "changelogUrl": "https://github.com/ThanhDV143/ThanhDV.Lib.Utilities/blob/main/Assets/CustomPackages/Utilities/CHANGELOG.md",
+    "license": "MIT"
+}

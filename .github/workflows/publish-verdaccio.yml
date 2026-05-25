@@ -1,4 +1,4 @@
-name: Publish ThanhDV.GameSaver to Verdaccio
+name: Publish ThanhDV.SaveKeeper.Json to Verdaccio
 
 # Triggered when a Git Tag matching v* is pushed
 on:
@@ -13,7 +13,7 @@ jobs:
     # Set the default working directory to the Unity Tool package.json location
     defaults:
       run:
-        working-directory: Assets/Packages/GameSaver # <<<<<<< TODO: CHANGE FOR EACH PROJECT
+        working-directory: Assets/Packages/SaveKeeper # <<<<<<< TODO: CHANGE FOR EACH PROJECT
         
     steps:
       # Step 1: Checkout the source code at the pushed tag

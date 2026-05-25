@@ -1,0 +1,105 @@
+---
+config:
+  theme: dark
+id: operation-handles-03
+title: Async Operation Handle Pattern
+---
+classDiagram
+    direction TB
+
+    %% Async operation pattern used by all SaveKeeper public APIs.
+    %% Public Handle wraps internal mutable state; Awaiter integrates with C# async/await.
+    %% Completion is marshaled back to the captured SynchronizationContext (Unity main thread).
+
+    class SaveKeeperOperationStatus {
+        <<enumeration>>
+        Pending
+        Succeeded
+        Failed
+    }
+
+    %% --- Non-generic chain ---
+
+    class SaveKeeperOperationHandle {
+        +bool IsDone
+        +SaveKeeperOperationStatus Status
+        +float PercentComplete
+        +Exception Error
+        +event Completed
+        +GetAwaiter() SaveKeeperAwaiter
+    }
+
+    class SaveKeeperAwaiter {
+        +bool IsCompleted
+        +OnCompleted(Action continuation) void
+        +GetResult() void
+    }
+
+    class SaveKeeperOperationInternal {
+        -SaveKeeperOperationStatus Status
+        -float PercentComplete
+        -Exception Error
+        -bool IsDone
+        -SynchronizationContext _capturedContext
+        -event Completed
+        -Action ContinuationAction
+        +Complete(Exception error) void
+    }
+
+    %% --- Generic chain (with Result) ---
+
+    class SaveKeeperOperationHandle_T {
+        +bool IsDone
+        +SaveKeeperOperationStatus Status
+        +float PercentComplete
+        +Exception Error
+        +T Result
+        +event Completed
+        +GetAwaiter() SaveKeeperAwaiter~T~
+    }
+
+    class SaveKeeperAwaiter_T {
+        +bool IsCompleted
+        +OnCompleted(Action continuation) void
+        +GetResult() T
+    }
+
+    class SaveKeeperOperationInternal_T {
+        -SaveKeeperOperationStatus Status
+        -float PercentComplete
+        -Exception Error
+        -T Result
+        -bool IsDone
+        -SynchronizationContext _capturedContext
+        -event Completed
+        -Action ContinuationAction
+        +Complete(T result, Exception error) void
+    }
+
+    class SaveKeeper {
+        +SaveAsync(...) Handle
+        +LoadAsync(...) Handle
+        +GetAllMetadataAsync~T~() Handle~List~T~~
+        +DeleteProfile(...) void
+        +RestoreBackup(...) void
+    }
+
+    %% Public surface returned by SaveKeeper APIs.
+    SaveKeeper --> SaveKeeperOperationHandle : Save / Load / RestoreBackup return
+    SaveKeeper --> SaveKeeperOperationHandle_T : GetAllMetadataAsync~T~ returns
+
+    %% Handle wraps mutable internal state and exposes an awaiter.
+    SaveKeeperOperationHandle --> SaveKeeperOperationInternal : wraps
+    SaveKeeperOperationHandle --> SaveKeeperAwaiter : awaitable via
+    SaveKeeperOperationHandle_T --> SaveKeeperOperationInternal_T : wraps
+    SaveKeeperOperationHandle_T --> SaveKeeperAwaiter_T : awaitable via
+
+    %% Status enum tracked by both internal variants.
+    SaveKeeperOperationInternal --> SaveKeeperOperationStatus : tracks
+    SaveKeeperOperationInternal_T --> SaveKeeperOperationStatus : tracks
+
+    %% Awaiter reads completion state from the wrapped internal.
+    SaveKeeperAwaiter ..> SaveKeeperOperationInternal : reads
+    SaveKeeperAwaiter_T ..> SaveKeeperOperationInternal_T : reads
+
+    note for SaveKeeperOperationInternal "Completion callbacks are Post'd back<br/>to the captured SynchronizationContext<br/>so subscribers run on the Unity main thread."

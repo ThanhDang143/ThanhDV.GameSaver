@@ -1,0 +1,46 @@
+---
+config:
+  theme: dark
+title: SaveKeeper — Save Flow
+---
+sequenceDiagram
+    autonumber
+    actor Caller as Game Code
+    participant GS as SaveKeeper
+    participant Sav as Registered ISavables
+    participant Ser as ISerializer
+    participant Enc as IEncryptionProvider
+    participant Store as IStorageProvider
+
+    Caller->>GS: SaveAsync(profileId, metadata)
+    Note right of Caller: metadata may be null<br/>(lib uses DefaultSaveMeta)
+
+    rect rgba(0, 150, 255, 0.12)
+        Note over GS, Sav: 1. Collect
+        loop For each ISavable
+            GS->>Sav: CaptureData()
+            Sav-->>GS: ISaveData
+        end
+    end
+
+    rect rgba(255, 165, 0, 0.12)
+        Note over GS, Enc: 2. Encode
+        GS->>Ser: Serialize(SaveData)
+        Ser-->>GS: JSON
+        opt UseEncryption
+            GS->>Enc: Encrypt(JSON)
+            Enc-->>GS: cipher
+        end
+    end
+
+    rect rgba(0, 200, 100, 0.12)
+        Note over GS, Store: 3. Persist
+        GS->>Store: WriteAsync(profileId, .sav)
+        Store-->>GS: ok
+        GS->>Store: WriteAsync(profileId, .meta)
+        Store-->>GS: ok
+        Note right of Store: .sav = source of truth (encrypted)<br/>.meta = sidecar cache (plain JSON)<br/>Order matters for stale detection
+    end
+
+    GS-->>Caller: Handle complete
+    GS-->>Caller: Fire OnSaveCompleted(profileId)
