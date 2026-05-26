@@ -1,0 +1,16 @@
+{
+                        "name": "SaveKeeper.Generated",
+                        "rootNamespace": "",
+                        "references": [
+                            "GUID:b94cf75cc62c7154faf8c40a883ed3af"
+                        ],
+                        "includePlatforms": [],
+                        "excludePlatforms": [],
+                        "allowUnsafeCode": false,
+                        "overrideReferences": false,
+                        "precompiledReferences": [],
+                        "autoReferenced": true,
+                        "defineConstraints": [],
+                        "versionDefines": [],
+                        "noEngineReferences": false
+                    }

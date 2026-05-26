@@ -37,11 +37,6 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         [TearDown]
         public void TearDown()
         {
-            if (_settings != null)
-            {
-                UnityEngine.Object.DestroyImmediate(_settings);
-            }
-
             _SaveKeeper?.Dispose();
         }
 
@@ -58,17 +53,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             IEncryptionProvider encryption = nullTarget == "encryption" ? null : new TrackingEncryptionProvider();
             SaveSettings settings = nullTarget == "settings" ? null : CreateSettings(useEncryption: true);
 
-            try
-            {
-                Assert.Throws<ArgumentNullException>(() => new SaveKeeperRuntime(registry, storage, serializer, encryption, settings));
-            }
-            finally
-            {
-                if (settings != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(settings);
-                }
-            }
+            Assert.Throws<ArgumentNullException>(() => new SaveKeeperRuntime(registry, storage, serializer, encryption, settings));
         }
 
         [Test]
@@ -869,7 +854,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         [Test]
         public void AutoSaveTick_AutoSaveDisabled_DoesNotTriggerSave()
         {
-            SetPrivateField(_settings, "_enableAutoSave", false);
+            ReplaceSettings(CreateSettings(useEncryption: true, enableAutoSave: false));
             SetPrivateField(_SaveKeeper, "_curProfileId", "profile-disabled");
             SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
 
@@ -882,7 +867,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         [Test]
         public void AutoSaveTick_NoCurrentProfile_DoesNotTriggerSave()
         {
-            SetPrivateField(_settings, "_enableAutoSave", true);
+            // SetUp creates _settings with EnableAutoSave=true (default) — no need to set it.
             SetPrivateField<string>(_SaveKeeper, "_curProfileId", null);
             SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
 
@@ -895,8 +880,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         [UnityTest]
         public IEnumerator AutoSaveTick_CountdownReached_TriggersImplicitSave()
         {
-            SetPrivateField(_settings, "_enableAutoSave", true);
-            SetPrivateField(_settings, "_autoSaveTime", 1f);
+            ReplaceSettings(CreateSettings(useEncryption: true, enableAutoSave: true, autoSaveTime: 1f));
             SetPrivateField(_SaveKeeper, "_curProfileId", "profile-tick");
             SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
 
@@ -1739,21 +1723,32 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
 
         private void RecreateSaveKeeper(bool useEncryption)
         {
+            ReplaceSettings(CreateSettings(useEncryption));
+        }
+
+        /// <summary>
+        /// Replaces <see cref="_settings"/> with the given instance and rebuilds <see cref="_SaveKeeper"/>.
+        /// Used by tests that need to vary settings the SUT was constructed with (settings is immutable post-construction).
+        /// </summary>
+        private void ReplaceSettings(SaveSettings newSettings)
+        {
             _SaveKeeper.Dispose();
-            UnityEngine.Object.DestroyImmediate(_settings);
-            _settings = CreateSettings(useEncryption);
+            _settings = newSettings;
             _SaveKeeper = new SaveKeeperRuntime(_registry, _storage, _serializer, _encryption, _settings);
         }
 
-        private static SaveSettings CreateSettings(bool useEncryption)
+        private static SaveSettings CreateSettings(
+            bool useEncryption,
+            bool enableAutoSave = true,
+            float autoSaveTime = 300f) => new()
         {
-            SaveSettings settings = ScriptableObject.CreateInstance<SaveSettings>();
-            SetPrivateField(settings, "_useEncryption", useEncryption);
-            SetPrivateField(settings, "_fileName", "slot");
-            SetPrivateField(settings, "_saveExtension", ".sav");
-            SetPrivateField(settings, "_metaExtension", ".meta");
-            return settings;
-        }
+            UseEncryption = useEncryption,
+            EnableAutoSave = enableAutoSave,
+            AutoSaveTime = autoSaveTime,
+            FileName = "slot",
+            SaveExtension = ".sav",
+            MetaExtension = ".meta",
+        };
 
         private static void SetPrivateField<T>(object target, string fieldName, T value)
         {

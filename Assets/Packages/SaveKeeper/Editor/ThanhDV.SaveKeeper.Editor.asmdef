@@ -1,0 +1,20 @@
+{
+	"name": "ThanhDV.SaveKeeper.Editor",
+	"rootNamespace": "ThanhDV.SaveKeeper.Editor",
+	"references": [
+		"GUID:b94cf75cc62c7154faf8c40a883ed3af",
+		"GUID:5d90c741d2687574da2e3cda1775085c",
+		"GUID:99a8b5124e7b6a04d9c4609704c57941"
+	],
+	"includePlatforms": [
+		"Editor"
+	],
+	"excludePlatforms": [],
+	"allowUnsafeCode": false,
+	"overrideReferences": false,
+	"precompiledReferences": [],
+	"autoReferenced": true,
+	"defineConstraints": [],
+	"versionDefines": [],
+	"noEngineReferences": false
+}

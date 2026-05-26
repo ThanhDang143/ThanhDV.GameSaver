@@ -1,0 +1,10 @@
+{
+  "UseEncryption": true,
+  "FileName": "Default",
+  "SaveExtension": ".sav",
+  "MetaExtension": ".meta",
+  "EnableAutoSave": true,
+  "AutoSaveTime": 300.0,
+  "AutoSaveOnQuit": true,
+  "AutoSaveOnQuitTimeout": 3000
+}

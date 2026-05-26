@@ -1,4 +1,4 @@
-name: Publish ThanhDV.SaveKeeper.Json to Verdaccio
+name: Publish SaveKeeperJson to Verdaccio
 
 # Triggered when a Git Tag matching v* is pushed
 on:

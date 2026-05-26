@@ -18,7 +18,7 @@
         "url": "https://knowledge.thanhdv.com/"
     },
     "dependencies": {
-        "thanhdv.fork.newtonsoft-json": "3.2.2"
+        "thanhdv.fork.unity.newtonsoft-json": "3.2.2"
     },
     "repository": {
         "type": "git",
