@@ -3,8 +3,10 @@
 // Source: ProjectSettings/SaveKeeperSettings.json
 namespace ThanhDV.SaveKeeper.Core
 {
+    [UnityEngine.Scripting.Preserve]
     public static class SaveKeeperSettings
     {
+        [UnityEngine.Scripting.Preserve]
         public static SaveSettings Create() => new SaveSettings
         {
             UseEncryption = true,

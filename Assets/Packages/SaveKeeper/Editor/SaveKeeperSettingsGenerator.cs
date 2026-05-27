@@ -54,8 +54,10 @@ namespace ThanhDV.SaveKeeper.Editor
             sb.AppendLine("// Source: ProjectSettings/SaveKeeperSettings.json");
             sb.AppendLine("namespace ThanhDV.SaveKeeper.Core");
             sb.AppendLine("{");
+            sb.AppendLine("    [UnityEngine.Scripting.Preserve]");
             sb.AppendLine("    public static class SaveKeeperSettings");
             sb.AppendLine("    {");
+            sb.AppendLine("        [UnityEngine.Scripting.Preserve]");
             sb.AppendLine("        public static SaveSettings Create() => new SaveSettings");
             sb.AppendLine("        {");
             sb.AppendLine($"            UseEncryption = {FormatBool(s.UseEncryption)},");
