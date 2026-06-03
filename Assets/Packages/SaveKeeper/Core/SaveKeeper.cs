@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace ThanhDV.SaveKeeper.Core
 {
-    public class SaveKeeper : IDisposable
+    public class SaveKeeper : ISaveKeeper
     {
         private readonly SaveRegistry _registry;
         private readonly IStorageProvider _storageProvider;

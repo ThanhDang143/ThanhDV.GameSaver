@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using ThanhDV.SaveKeeper.Common;
 using ThanhDV.SaveKeeper.Core;
 
 namespace ThanhDV.SaveKeeper.Infrastructure

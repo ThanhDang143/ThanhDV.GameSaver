@@ -26,7 +26,7 @@ namespace ThanhDV.SaveKeeper.Singleton
         // Must match SaveKeeperSettingsGenerator's generated type and assembly names.
         private const string GENERATED_FACTORY_AQN = "ThanhDV.SaveKeeper.Core.SaveKeeperSettings, SaveKeeper.Generated";
 
-        private static volatile CoreKeeper _instance;
+        private static volatile ISaveKeeper _instance;
         private static volatile SaveRegistry _registry;
 
         /// <summary>
@@ -36,7 +36,7 @@ namespace ThanhDV.SaveKeeper.Singleton
 
         /// <summary>The shared SaveKeeper instance.</summary>
         /// <exception cref="InvalidOperationException">Thrown if accessed before Initialize.</exception>
-        public static CoreKeeper Instance => _instance ?? throw NotInitialized();
+        public static ISaveKeeper Instance => _instance ?? throw NotInitialized();
 
         // <summary>
         /// The SaveRegistry backing the shared instance. ISavable objects register/unregister here.
