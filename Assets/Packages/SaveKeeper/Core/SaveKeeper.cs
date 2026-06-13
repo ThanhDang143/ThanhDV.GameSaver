@@ -54,13 +54,13 @@ namespace ThanhDV.SaveKeeper.Core
         private string SaveName => _settings.FileName + _settings.SaveExtension;
 
         /// <summary>
-        /// Per-profile save state for concurrency control. Each entry represents a profile that currently has
-        /// a save pipeline running and/or coalesced trailing requests waiting. Access must be guarded by _stateLock.
+        /// Per-profile pipeline state for concurrency control. Each entry represents a profile that currently has
+        /// a save or load pipeline running and/or coalesced trailing save requests waiting. Access must be guarded by _stateLock.
         /// </summary>
-        private readonly Dictionary<string, ProfileSaveState> _saveStates = new();
+        private readonly Dictionary<string, ProfilePipelineState> _profileStates = new();
 
         /// <summary>
-        /// Lock guarding _saveStates, _curSaveData (both inner dictionaries), and _curProfileId.
+        /// Lock guarding _profileStates, _curSaveData (both inner dictionaries), and _curProfileId.
         /// Held only for short, await-free critical sections to avoid serializing IO.
         /// </summary>
         private readonly object _stateLock = new();
@@ -112,7 +112,7 @@ namespace ThanhDV.SaveKeeper.Core
         /// <returns>The most recent profile ID, or null if no profiles exist.</returns>
         public string GetMostRecentProfileId()
         {
-            return _storageProvider.GetMostRecentProfileId();
+            return _storageProvider.GetMostRecentProfileId(SaveName);
         }
 
         /// <summary>
@@ -130,8 +130,8 @@ namespace ThanhDV.SaveKeeper.Core
         /// </summary>
         /// <param name="profileId">The ID of the profile to delete.</param>
         /// <exception cref="InvalidOperationException">
-        /// Thrown when a save operation is currently in flight for the same profile.
-        /// Wait for the save to complete (or for trailing saves to drain) before deleting.
+        /// Thrown when a save or load operation is currently in flight for the same profile.
+        /// Wait for the operation to complete (or for trailing saves to drain) before deleting.
         /// </exception>
         public void DeleteProfile(string profileId)
         {
@@ -139,10 +139,10 @@ namespace ThanhDV.SaveKeeper.Core
 
             lock (_stateLock)
             {
-                // Reject if a save (async or immediate) is in flight for this profile.
-                if (_saveStates.TryGetValue(profileId, out ProfileSaveState saveState) && saveState.IsRunning)
+                // Reject if any operation (save async/immediate or load) is in flight for this profile.
+                if (_profileStates.TryGetValue(profileId, out ProfilePipelineState saveState) && saveState.Activity != PipelineActivity.None)
                 {
-                    throw new InvalidOperationException($"Cannot delete profile '{profileId}' while a save operation is in flight for the same profile.");
+                    throw new InvalidOperationException($"Cannot delete profile '{profileId}' while a save or load operation is in flight for the same profile.");
                 }
 
                 _storageProvider.DeleteProfile(profileId);
@@ -154,7 +154,7 @@ namespace ThanhDV.SaveKeeper.Core
                     ClearSimpleDataDirtyFlag();
                 }
 
-                _saveStates.Remove(profileId);
+                _profileStates.Remove(profileId);
             }
 
             DebugLog.Success($"Successfully deleted profile: {profileId}");
@@ -174,8 +174,9 @@ namespace ThanhDV.SaveKeeper.Core
         {
             SaveKeeperOperationInternal internalOp = new();
 
-            string targetProfile = profileId ?? _curProfileId;
             bool isImplicit = profileId == null;
+            string targetProfile;
+            lock (_stateLock) targetProfile = profileId ?? _curProfileId;
 
             if (string.IsNullOrEmpty(targetProfile))
             {
@@ -184,40 +185,60 @@ namespace ThanhDV.SaveKeeper.Core
                 return new SaveKeeperOperationHandle(internalOp);
             }
 
+            Dictionary<string, ISaveData> captured;
+            try
+            {
+                captured = CaptureAllSavables();
+            }
+            catch (Exception e)
+            {
+                internalOp.Complete(e);
+                return new SaveKeeperOperationHandle(internalOp);
+            }
+
             bool rejectedBySaveImmediate = false;
+            bool rejectedByLoad = false;
             lock (_stateLock)
             {
-                if (!_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState))
+                if (!_profileStates.TryGetValue(targetProfile, out ProfilePipelineState saveState))
                 {
                     saveState = new();
-                    _saveStates[targetProfile] = saveState;
+                    _profileStates[targetProfile] = saveState;
                 }
 
-                if (saveState.IsRunning)
+                switch (saveState.Activity)
                 {
-                    if (saveState.IsSaveImmediate)
-                    {
+                    case PipelineActivity.Load:
+                        // A load is in flight — cannot save over a profile being restored.
+                        rejectedByLoad = true;
+                        break;
+                    case PipelineActivity.ImmediateSave:
                         // A SaveImmediate is in flight — cannot coalesce into a synchronous run.
                         rejectedBySaveImmediate = true;
-                    }
-                    else
-                    {
+                        break;
+                    case PipelineActivity.AsyncSave:
                         // Normal coalesce: another SaveAsync is running.
                         saveState.IsDirty = true;
                         if (metadata != null) saveState.PendingMetadata = metadata;
+                        saveState.PendingCaptured = captured;
                         saveState.PendingHandles.Add(internalOp);
-                    }
-                }
-                else
-                {
-                    // No save in flight — claim the slot and start the leading pipeline.
-                    saveState.RunningTask = ProcessSaveAsync(targetProfile, isImplicit, metadata, internalOp);
+                        break;
+                    default:
+                        // None — claim the slot and start the leading pipeline.
+                        saveState.Activity = PipelineActivity.AsyncSave;
+                        saveState.RunningTask = ProcessSaveAsync(targetProfile, isImplicit, metadata, captured, internalOp);
+                        break;
                 }
             }
 
             if (rejectedBySaveImmediate)
             {
                 InvalidOperationException error = new($"Cannot SaveAsync for profile '{targetProfile}' while a SaveImmediate is in flight.");
+                internalOp.Complete(error);
+            }
+            else if (rejectedByLoad)
+            {
+                InvalidOperationException error = new($"Cannot SaveAsync for profile '{targetProfile}' while a load operation is in flight.");
                 internalOp.Complete(error);
             }
 
@@ -235,33 +256,39 @@ namespace ThanhDV.SaveKeeper.Core
         /// </exception>
         public void SaveImmediate(string profileId = null, ISaveMeta metadata = null)
         {
-            string targetProfile = profileId ?? _curProfileId;
             bool isImplicit = profileId == null;
+            string targetProfile;
+            lock (_stateLock) targetProfile = profileId ?? _curProfileId;
 
             if (string.IsNullOrEmpty(targetProfile)) throw new InvalidOperationException("Cannot save: No valid ProfileId was provided or found.");
 
             DateTime now = ReadClockAndCheckSkew($"save '{targetProfile}'");
             ISaveMeta resolvedMeta = metadata ?? new DefaultSaveMeta(targetProfile, now);
-            SaveData snapshot;
             lock (_stateLock)
             {
-                if (_saveStates.TryGetValue(targetProfile, out ProfileSaveState existingSaveState) && existingSaveState.IsRunning)
+                if (_profileStates.TryGetValue(targetProfile, out ProfilePipelineState existingSaveState) && existingSaveState.Activity != PipelineActivity.None)
                 {
                     throw new InvalidOperationException($"Cannot SaveImmediate for profile '{targetProfile}' while another save operation is in flight.");
                 }
 
-                ProfileSaveState saveState = existingSaveState ?? new();
-                saveState.IsSaveImmediate = true;
-                _saveStates[targetProfile] = saveState;
-
-                _curSaveData.Meta = resolvedMeta;
-                CaptureAllSavables();
-                snapshot = _curSaveData.Clone();
-                ClearSimpleDataDirtyFlag();
+                ProfilePipelineState saveState = existingSaveState ?? new();
+                saveState.Activity = PipelineActivity.ImmediateSave;
+                _profileStates[targetProfile] = saveState;
             }
 
             try
             {
+                Dictionary<string, ISaveData> captured = CaptureAllSavables();
+                SaveData snapshot;
+
+                lock (_stateLock)
+                {
+                    _curSaveData.Meta = resolvedMeta;
+                    foreach (var kvp in captured) _curSaveData.ObjectData[kvp.Key] = kvp.Value;
+                    snapshot = _curSaveData.Clone();
+                    ClearSimpleDataDirtyFlag();
+                }
+
                 string data = _serializer.Serialize(snapshot);
                 string finalData = _settings.UseEncryption ? _encryptionProvider.Encrypt(data) : data;
 
@@ -287,13 +314,13 @@ namespace ThanhDV.SaveKeeper.Core
                 // there should be no pending handles or dirty flag here.
                 lock (_stateLock)
                 {
-                    if (_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState))
+                    if (_profileStates.TryGetValue(targetProfile, out ProfilePipelineState saveState))
                     {
-                        saveState.IsSaveImmediate = false;
+                        saveState.Activity = PipelineActivity.None;
 
                         if (!saveState.IsDirty && saveState.PendingHandles.Count == 0)
                         {
-                            _saveStates.Remove(targetProfile);
+                            _profileStates.Remove(targetProfile);
                         }
                     }
                 }
@@ -370,7 +397,7 @@ namespace ThanhDV.SaveKeeper.Core
 
             try
             {
-                string mostRecentProfile = _storageProvider.GetMostRecentProfileId();
+                string mostRecentProfile = _storageProvider.GetMostRecentProfileId(SaveName);
 
                 if (string.IsNullOrEmpty(mostRecentProfile))
                 {
@@ -406,32 +433,36 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
         /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
-        private async Task ProcessSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, SaveKeeperOperationInternal internalOp)
+        private async Task ProcessSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, Dictionary<string, ISaveData> captured, SaveKeeperOperationInternal internalOp)
         {
-            await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, internalOp).ConfigureAwait(false);
+            await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, captured, internalOp).ConfigureAwait(false);
 
             // Trailing loop: drain coalesced SaveAsync calls.
             int iterations = 0;
             while (true)
             {
                 ISaveMeta trailingMetatdata;
+                Dictionary<string, ISaveData> trailingCaptured;
                 SaveKeeperOperationInternal[] pendingOps;
 
                 lock (_stateLock)
                 {
-                    if (!_saveStates.TryGetValue(targetProfile, out ProfileSaveState saveState)) return;
+                    if (!_profileStates.TryGetValue(targetProfile, out ProfilePipelineState saveState)) return;
 
                     if (!saveState.IsDirty)
                     {
+                        saveState.Activity = PipelineActivity.None;
                         saveState.RunningTask = null;
-                        _saveStates.Remove(targetProfile);
+                        _profileStates.Remove(targetProfile);
                         return;
                     }
 
                     trailingMetatdata = saveState.PendingMetadata;
+                    trailingCaptured = saveState.PendingCaptured;
                     pendingOps = saveState.PendingHandles.ToArray();
                     saveState.PendingHandles.Clear();
                     saveState.PendingMetadata = null;
+                    saveState.PendingCaptured = null;
                     saveState.IsDirty = false;
                 }
 
@@ -444,7 +475,7 @@ namespace ThanhDV.SaveKeeper.Core
                 // Trailing pipeline is never "implicit" — it always targets the resolved profile explicitly.
                 // The leading pipeline already updated _curProfileId if needed.
                 SaveKeeperOperationInternal trailingOp = new();
-                await ProcessSingleSaveAsync(targetProfile, false, trailingMetatdata, trailingOp).ConfigureAwait(false);
+                await ProcessSingleSaveAsync(targetProfile, false, trailingMetatdata, trailingCaptured, trailingOp).ConfigureAwait(false);
 
                 for (int i = 0; i < pendingOps.Length; i++)
                 {
@@ -462,7 +493,7 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        private async Task ProcessSingleSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, SaveKeeperOperationInternal internalOp)
+        private async Task ProcessSingleSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, Dictionary<string, ISaveData> captured, SaveKeeperOperationInternal internalOp)
         {
             try
             {
@@ -476,7 +507,7 @@ namespace ThanhDV.SaveKeeper.Core
                 lock (_stateLock)
                 {
                     _curSaveData.Meta = resolvedMeta;
-                    CaptureAllSavables();
+                    if (captured != null) foreach (var kvp in captured) _curSaveData.ObjectData[kvp.Key] = kvp.Value;
                     snapshot = _curSaveData.Clone();
                     ClearSimpleDataDirtyFlag();
                 }
@@ -519,16 +550,34 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         private async Task ProcessLoadAsync(string profileId, bool isBackup, SaveKeeperOperationInternal internalOp)
         {
+            bool claimedLoad = false;
             try
             {
                 if (string.IsNullOrEmpty(profileId)) throw new InvalidOperationException("Cannot load: No valid ProfileId was provided or found.");
 
                 lock (_stateLock)
                 {
-                    if (_saveStates.TryGetValue(profileId, out ProfileSaveState saveState) && saveState.IsRunning)
+                    if (_profileStates.TryGetValue(profileId, out ProfilePipelineState state))
                     {
-                        throw new InvalidOperationException($"Cannot load profile '{profileId}' while a save operation is in flight for the same profile.");
+                        if (state.Activity == PipelineActivity.AsyncSave || state.Activity == PipelineActivity.ImmediateSave)
+                        {
+                            throw new InvalidOperationException($"Cannot load profile '{profileId}' while a save operation is in flight for the same profile.");
+                        }
+
+                        if (state.Activity == PipelineActivity.Load)
+                        {
+                            throw new InvalidOperationException($"Cannot load profile '{profileId}' while another load operation is in flight for the same profile.");
+                        }
+
+                        state.Activity = PipelineActivity.Load;
                     }
+                    else
+                    {
+                        state = new() { Activity = PipelineActivity.Load };
+                        _profileStates[profileId] = state;
+                    }
+
+                    claimedLoad = true;
                 }
 
                 string rawData;
@@ -597,6 +646,25 @@ namespace ThanhDV.SaveKeeper.Core
 
                 internalOp.Complete(e);
             }
+            finally
+            {
+                // Release the load slot.
+                // Guard with claimedLoad so a rejected attempt (save/load already in flight) does not clear the slot owned by the operation that actually holds it.
+                if (claimedLoad)
+                {
+                    lock (_stateLock)
+                    {
+                        if (_profileStates.TryGetValue(profileId, out ProfilePipelineState state))
+                        {
+                            state.Activity = PipelineActivity.None;
+                            if (!state.IsDirty && state.PendingHandles.Count <= 0)
+                            {
+                                _profileStates.Remove(profileId);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -663,7 +731,7 @@ namespace ThanhDV.SaveKeeper.Core
                 Task[] runningTasks;
                 lock (_stateLock)
                 {
-                    runningTasks = _saveStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
+                    runningTasks = _profileStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
                 }
 
                 if (runningTasks.Length <= 0) return;
@@ -791,7 +859,11 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="savable">The newly observed object.</param>
         private void HandleRegistration(ISavable savable)
         {
-            lock (_stateLock) RestoreSavable(savable);
+            ISaveData saveData;
+            bool found;
+            lock (_stateLock) found = _curSaveData.ObjectData.TryGetValue(savable.SaveKey, out saveData);
+
+            if (found) savable.RestoreData(saveData);
         }
 
         /// <summary>
@@ -801,7 +873,10 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="savable">The object preparing to detach.</param>
         private void HandleUnregistration(ISavable savable)
         {
-            lock (_stateLock) CaptureSavable(savable);
+            ISaveData saveData = savable.CaptureData();
+            if (saveData == null) return;
+
+            lock (_stateLock) _curSaveData.ObjectData[savable.SaveKey] = saveData;
         }
 
         /// <summary>
@@ -861,7 +936,7 @@ namespace ThanhDV.SaveKeeper.Core
             Task[] tasks;
             lock (_stateLock)
             {
-                tasks = _saveStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
+                tasks = _profileStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
             }
 
             if (tasks.Length > 0)
@@ -891,16 +966,6 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Reads isolated stored configuration blocks based on a savable's Key, and forces states appropriately.
-        /// Does not throw if data has never been persisted for the specific key context; simply pushes null.
-        /// </summary>
-        /// <param name="savable">The ISavable requiring deserialized data injection.</param>
-        private void RestoreSavable(ISavable savable)
-        {
-            RestoreSavable(savable, _curSaveData);
-        }
-
-        /// <summary>
         /// Restores a savable from the provided save-data snapshot.
         /// Skips invocation entirely when no entry exists for the savable's key — the object keeps its
         /// default state, freeing user code from having to null-check inside RestoreData.
@@ -914,28 +979,24 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Queries an established ISavable for an ISaveData bundle representing entirely mutable variables.
-        /// Safely ignores instances that respond with completely empty data definitions to avoid footprint overhead.
+        /// Calls CaptureData() on every registered savable and collects non-null results into a new dictionary.
+        /// Runs WITHOUT holding _stateLock — call this off-lock (it executes user CaptureData() code). 
+        /// Callers merge the returned dictionary into _curSaveData.ObjectData under _stateLock.
         /// </summary>
-        /// <param name="savable">The targeted ISavable expected to serialize its context variables locally.</param>
-        private void CaptureSavable(ISavable savable)
+        private Dictionary<string, ISaveData> CaptureAllSavables()
         {
-            ISaveData saveData = savable.CaptureData();
+            IReadOnlyList<ISavable> savables = _registry.Savables;
+            Dictionary<string, ISaveData> captured = new(savables.Count);
 
-            if (saveData == null) return;
-
-            _curSaveData.ObjectData[savable.SaveKey] = saveData;
-        }
-
-        /// <summary>
-        /// Sweeps through the registry to unconditionally process all tracked valid ISavables at once, requesting state captures asynchronously or synchronously.
-        /// </summary>
-        private void CaptureAllSavables()
-        {
-            foreach (ISavable savable in _registry.Savables)
+            foreach (ISavable savable in savables)
             {
-                CaptureSavable(savable);
+                ISaveData saveData = savable.CaptureData();
+                if (saveData == null) continue;
+
+                captured[savable.SaveKey] = saveData;
             }
+
+            return captured;
         }
 
         /// <summary>
@@ -969,7 +1030,8 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="profileId">The profile that was just persisted to disk.</param>
         private void NotifySaveCompleted(string profileId)
         {
-            bool matchesCurrent = profileId == _curProfileId;
+            bool matchesCurrent;
+            lock (_stateLock) matchesCurrent = profileId == _curProfileId;
             Action<string> handler = OnSaveCompleted;
 
             if (_capturedContext != null && _capturedContext != SynchronizationContext.Current)
@@ -1149,31 +1211,25 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Tracks per-profile save state for concurrency control. Each profile being actively saved (or with pending save requests)
-        /// has one instance of this class. Access must be guarded by SaveKeeper._stateLock.
+        /// Tracks per-profile pipeline state for concurrency control. Each profile with an in-flight save or load
+        /// (or pending coalesced save requests) has one instance of this class. Access must be guarded by SaveKeeper._stateLock.
         /// </summary>
-        private class ProfileSaveState
+        private class ProfilePipelineState
         {
             /// <summary>
-            /// True iff any save (async or immediate) is in flight for this profile.
+            /// The operation currently in flight for this profile. None = idle.
+            /// SaveAsync coalesces only when this is AsyncSave; ImmediateSave/Load reject incoming saves.
             /// </summary>
-            public bool IsRunning => RunningTask != null || IsSaveImmediate;
+            public PipelineActivity Activity;
 
             /// <summary>
-            /// Task from ProcessSaveAsync pipeline. Used to await all in-flight saves.
-            /// Null when idle or started via SaveImmediate (sync).
+            /// Task from the ProcessSaveAsync pipeline. Set only when Activity == AsyncSave; used to await in-flight saves.
             /// </summary>
             public Task RunningTask;
 
             /// <summary>
-            /// True if the in-flight save was started by SaveImmediate (synchronous).
-            /// SaveAsync calls arriving while this is true are rejected (cannot coalesce into a sync run).
-            /// </summary>
-            public bool IsSaveImmediate;
-
-            /// <summary>
-            /// True if at least one additional SaveAsync call arrived while IsRunning was true.
-            /// The trailing save will run after the current pipeline completes.
+            /// True if at least one additional SaveAsync arrived while an async save was running.
+            /// The trailing save runs after the current pipeline completes.
             /// </summary>
             public bool IsDirty;
 
@@ -1183,10 +1239,28 @@ namespace ThanhDV.SaveKeeper.Core
             public ISaveMeta PendingMetadata;
 
             /// <summary>
+            /// Last-wins captured object state from coalesced SaveAsync calls (captured at call time, off-lock,
+            /// on the main thread). The trailing save merges this instead of re-capturing.
+            /// </summary>
+            public Dictionary<string, ISaveData> PendingCaptured;
+
+            /// <summary>
             /// Handles of coalesced SaveAsync calls. All complete together when the trailing save finishes.
             /// </summary>
             public readonly List<SaveKeeperOperationInternal> PendingHandles = new();
         }
+
+        /// <summary>
+        /// The single in-flight operation kind for a profile. Save and Load are mutually exclusive per profile.
+        /// </summary>
+        private enum PipelineActivity
+        {
+            None,
+            AsyncSave,
+            ImmediateSave,
+            Load
+        }
+
 
         #endregion
     }

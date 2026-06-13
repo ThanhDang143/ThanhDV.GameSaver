@@ -8,9 +8,16 @@ namespace ThanhDV.SaveKeeper.Core
         string SaveKey { get; }
 
         /// <summary>
-        /// Captures the current state of the object.
+        /// Captures the current state of the object into an immutable snapshot.
         /// </summary>
-        /// <returns>An object implementing ISaveData that contains the captured state.</returns>
+        /// <remarks>
+        /// CONTRACT: the returned object is read on a background thread during async serialization
+        /// (<c>SaveAsync</c>), so it must be a self-contained snapshot that you do NOT mutate after returning.
+        /// Return a fresh object — e.g. <c>return new PlayerData { Hp = _hp };</c> — rather than a live reference
+        /// that gameplay keeps changing. Returning a live object whose fields or collections are mutated while the
+        /// save is in flight can corrupt the written data or throw "Collection was modified" mid-serialization.
+        /// </remarks>
+        /// <returns>An immutable <see cref="ISaveData"/> snapshot of the object's current state.</returns>
         ISaveData CaptureData();
 
         /// <summary>

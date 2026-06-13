@@ -76,9 +76,11 @@ namespace ThanhDV.SaveKeeper.Core
         IEnumerable<string> GetAllProfileIds();
 
         /// <summary>
-        /// Gets the most recently used profile identifier.
+        /// Gets the profile whose save file (or its backup, when the primary is missing) was written most recently.
+        /// Sidecar files (.meta) and transient files (.tmp) must NOT influence the result.
         /// </summary>
+        /// <param name="fileName">The primary save file name to rank profiles by (e.g. "Default.sav").</param>
         /// <returns>The most recent profile identifier, or <see langword="null"/> if none exists.</returns>
-        string GetMostRecentProfileId();
+        string GetMostRecentProfileId(string fileName);
     }
 }

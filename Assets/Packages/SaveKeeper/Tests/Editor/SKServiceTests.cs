@@ -172,7 +172,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             public bool Exists(string profileId, string fileName) => false;
             public DateTime? GetLastWriteTimeUtc(string profileId, string fileName) => null;
             public IEnumerable<string> GetAllProfileIds() => Array.Empty<string>();
-            public string GetMostRecentProfileId() => null;
+            public string GetMostRecentProfileId(string fileName) => null;
         }
 
         private sealed class NoopSerializer : ISerializer

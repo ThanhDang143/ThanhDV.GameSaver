@@ -275,7 +275,7 @@ namespace ThanhDV.SaveKeeper.Tests
 
             // Act
             // Hàm sẽ dựa theo LastAccessTimeUtc mới nhất
-            string recentProfile = _provider.GetMostRecentProfileId();
+            string recentProfile = _provider.GetMostRecentProfileId("save.json");
 
             // Assert
             Assert.AreEqual("profile_new", recentProfile, "Should return the profile containing the most recently modified file.");
@@ -285,10 +285,69 @@ namespace ThanhDV.SaveKeeper.Tests
         public void GetMostRecentProfileId_ReturnsNull_WhenNoProfilesExist()
         {
             // Act
-            string recentProfile = _provider.GetMostRecentProfileId();
+            string recentProfile = _provider.GetMostRecentProfileId("save.json");
 
             // Assert
             Assert.IsNull(recentProfile, "Should return null if no profiles/files exist.");
+        }
+
+        [Test]
+        public void GetMostRecentProfileId_IgnoresNonSaveFiles()
+        {
+            _provider.WriteImmediate("profile_A", "save.json", "a");
+            _provider.WriteImmediate("profile_B", "save.json", "b");
+
+            System.DateTime past = System.DateTime.UtcNow.AddDays(-1);
+            System.DateTime future = System.DateTime.UtcNow.AddDays(1);
+            string bDir = Path.Combine(_testBasePath, "profile_B");
+
+            // B's primary save is OLDER than A's save.
+            File.SetLastWriteTimeUtc(Path.Combine(bDir, "save.json"), past);
+
+            // B also has a meta sidecar (e.g. a metadata self-heal write) and a leftover temp file, both NEWER
+            // than A's save. Neither must influence the ranking — only the primary save's mtime counts.
+            string bMeta = Path.Combine(bDir, "save.meta");
+            File.WriteAllText(bMeta, "meta");
+            File.SetLastWriteTimeUtc(bMeta, future);
+
+            string bTmp = Path.Combine(bDir, "save.json.tmp");
+            File.WriteAllText(bTmp, "tmp");
+            File.SetLastWriteTimeUtc(bTmp, future);
+
+            string recent = _provider.GetMostRecentProfileId("save.json");
+
+            Assert.AreEqual("profile_A", recent,
+                "Only the primary save file's mtime should rank profiles; .meta/.tmp must be ignored.");
+        }
+
+        [Test]
+        public void GetMostRecentProfileId_FallsBackToBackup_WhenPrimaryMissing()
+        {
+            string aDir = Path.Combine(_testBasePath, "profile_A");
+            Directory.CreateDirectory(aDir);
+
+            // Only a backup exists (the primary save was lost) — the profile should still be considered.
+            File.WriteAllText(Path.Combine(aDir, "save.json" + Constant.FILE_BACKUP_EXTENTION), "backup");
+
+            string recent = _provider.GetMostRecentProfileId("save.json");
+
+            Assert.AreEqual("profile_A", recent,
+                "A profile whose primary save is missing but has a backup should still be returned.");
+        }
+
+        [Test]
+        public void GetMostRecentProfileId_SkipsProfileWithNoSaveOrBackup()
+        {
+            string aDir = Path.Combine(_testBasePath, "profile_A");
+            Directory.CreateDirectory(aDir);
+
+            // Only a sidecar — no save, no backup → not loadable, must be skipped.
+            File.WriteAllText(Path.Combine(aDir, "save.meta"), "meta");
+
+            string recent = _provider.GetMostRecentProfileId("save.json");
+
+            Assert.IsNull(recent,
+                "A profile with only a sidecar (no save or backup) must not be returned.");
         }
 
         [Test]

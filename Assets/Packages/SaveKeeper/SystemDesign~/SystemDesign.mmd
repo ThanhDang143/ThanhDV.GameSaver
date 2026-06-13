@@ -1,32 +1,79 @@
 ---
+title: SaveKeeper System Design — Target Architecture (Moderate)
 config:
   theme: dark
-id: index-00
-title: SaveKeeper System Design — Index
+  securityLevel: loose
 ---
-%% The full system design has been split into 4 focused diagrams to reduce edge crossing.
-%% Open the individual .mmd files in this folder for each concern.
-%%
-%%   01-Architecture-Overview.mmd     High-level layered view (contracts, core, services)
-%%   02-Save-Load-Pipeline.mmd        Runtime flow: register → capture → write / read → restore
-%%   03-Operation-Handles.mmd         Async handle + awaiter pattern
-%%   04-Serialization-Storage.mmd     Infrastructure layer (JSON binder, file storage, AES)
-%%
-%% Render any of them with Mermaid Live Editor, VS Code Mermaid extension,
-%% or any tool supporting `.mmd` files.
-
 flowchart TB
-    A["01 — Architecture Overview<br/>contracts • core • services"]
-    B["02 — Save/Load Pipeline<br/>SaveKeeper runtime flow"]
-    C["03 — Operation Handles<br/>async handle pattern"]
-    D["04 — Serialization & Storage<br/>infrastructure layer"]
+    %% TARGET architecture after the Moderate decomposition (agreed 2026-06).
+    %% Dependency rule: arrows point INWARD (toward Core -> Common).
+    %% Only the Service layer knows concretes (Infrastructure / AutoSave).
+    %% AutoSaveService depends on ISaveKeeper ONLY -- never on GlobalSaveKeeper.
+    %% Litmus test: Core.asmdef and Common.asmdef compile with noEngineReferences = true.
+    %%
+    %% P2: NO SaveSettings. File naming = Constant; encryption = IEncryptionProvider
+    %% injection (NullEncryptionProvider to opt out); auto-save config lives in AutoSaveService.
+    %% The Editor assembly (was settings tooling only) is removed entirely.
 
-    A --> B
-    A --> D
-    B --> C
-    B --> D
+    subgraph SVC["Service layer · OPT-IN (compose / convenience)"]
+        direction TB
+        SK["GlobalSaveKeeper<br/><i>static global access + composition root</i>"]
+        AS["AutoSaveService<br/><i>PlayerLoop tick · quit/focus flush · countdown + own config</i>"]
+    end
 
-    style A fill:#2d4a2d,stroke:#5a8a5a
-    style B fill:#2d3d5a,stroke:#5a7aaa
-    style C fill:#5a3d2d,stroke:#aa7a5a
-    style D fill:#3d2d4a,stroke:#7a5aaa
+    subgraph INFRA["Infrastructure · Unity + Newtonsoft adapters"]
+        direction TB
+        LS["LocalStorageProvider"]
+        JS["JsonSerializer · SafeTypeBinder<br/>Unity JSON converters"]
+        AESN["AESProvider"]
+        NEP["NullEncryptionProvider<br/><i>identity — opt out of encryption</i>"]
+        ULOG["UnityLogger"]
+        LIVE["Unity liveness probe"]
+    end
+
+    subgraph CORE["Core · Contracts + Engine — noEngineReferences = true"]
+        direction TB
+        subgraph PORTS["Contracts — ports + model"]
+            ISK["ISaveKeeper"]
+            PRT["ISerializer · IStorageProvider<br/>IEncryptionProvider · ISavable<br/>ISaveData · ISaveMeta"]
+            MDL["SaveData · OperationHandle<br/>attributes · exceptions"]
+        end
+        subgraph ENG["Engine"]
+            FAC["SaveKeeper · facade (thin orchestrator)<br/><i>ctor: registry, storage, serializer, encryption</i>"]
+            CRD["ProfileOperationCoordinator<br/><i>internal · concurrency + save/load exclusion (#1)</i>"]
+            MTA["MetadataReader<br/><i>internal · list + self-heal</i>"]
+            REG["SaveRegistry"]
+        end
+    end
+
+    subgraph CMN["Common · PURE C# — noEngineReferences = true"]
+        CST["Constant<br/><i>file names + extensions</i>"]
+        ILOG["ISaveKeeperLogger · port"]
+    end
+
+    %% dependencies (inward)
+    SK --> ISK
+    SK --> INFRA
+    SK -.->|starts| AS
+    AS --> ISK
+    INFRA --> CORE
+    CORE --> CMN
+    INFRA --> CMN
+
+    %% engine wiring (within Core)
+    FAC --> CRD
+    FAC --> MTA
+    FAC --> REG
+
+    %% adapters implement ports
+    FAC -.->|implements| ISK
+    LS -.->|implements| PRT
+    JS -.->|implements| PRT
+    AESN -.->|implements| PRT
+    NEP -.->|implements| PRT
+    ULOG -.->|implements| ILOG
+
+    style CORE fill:#2d4a2d,stroke:#5a8a5a
+    style CMN fill:#1f3a1f,stroke:#5a8a5a
+    style INFRA fill:#3d2d4a,stroke:#7a5aaa
+    style SVC fill:#2d3d5a,stroke:#5a7aaa

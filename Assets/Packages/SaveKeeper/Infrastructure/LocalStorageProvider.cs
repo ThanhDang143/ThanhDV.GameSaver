@@ -57,7 +57,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         private async Task WriteToFileAsync(string fullPath, string data)
         {
             PrepareDirectory(fullPath);
-            string tempPath = fullPath + Constant.FILE_TEMP_EXTENTION;
+            string tempPath = fullPath + "." + Guid.NewGuid().ToString("N") + Constant.FILE_TEMP_EXTENTION;
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
             try
@@ -84,7 +84,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         private void WriteToFileImmediate(string fullPath, string data)
         {
             PrepareDirectory(fullPath);
-            string tempPath = fullPath + Constant.FILE_TEMP_EXTENTION;
+            string tempPath = fullPath + "." + Guid.NewGuid().ToString("N") + Constant.FILE_TEMP_EXTENTION;
             string backupPath = fullPath + Constant.FILE_BACKUP_EXTENTION;
 
             try
@@ -238,23 +238,28 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Identifies the profile that was most recently accessed or modified.
+        /// Identifies the profile whose primary save file was written most recently, falling back to the profile's backup (.bak) when the primary is missing. 
+        /// Other files (.meta sidecar, leftover .tmp) are ignored so a self-healed metadata write or a crashed temp file cannot make the wrong profile look most recent.
         /// </summary>
-        /// <returns>The newest profile ID, or null if no profiles exist.</returns>
-        public string GetMostRecentProfileId()
+        /// <param name="fileName">The primary save file name to rank profiles by.</param>
+        /// <returns>The newest profile ID, or null if no profile has a save or backup file.</returns>
+        public string GetMostRecentProfileId(string fileName)
         {
             if (!Directory.Exists(_basePath)) return null;
 
             try
             {
+                string backupName = fileName + Constant.FILE_BACKUP_EXTENTION;
                 DirectoryInfo directory = new DirectoryInfo(_basePath);
 
-                FileInfo mostRecentFile = directory.EnumerateDirectories()
-                                            .SelectMany(dir => dir.EnumerateFiles("*.*", SearchOption.AllDirectories))
-                                            .OrderByDescending(f => f.LastWriteTimeUtc)
+                string mostRecentFile = directory.EnumerateDirectories()
+                                            .Select(dir => new { ProfileId = dir.Name, Mtime = GetSaveMtime(dir, fileName, backupName) })
+                                            .Where(x => x.Mtime.HasValue)
+                                            .OrderByDescending(f => f.Mtime.Value)
+                                            .Select(f => f.ProfileId)
                                             .FirstOrDefault();
 
-                return mostRecentFile?.Directory?.Name;
+                return mostRecentFile;
             }
             catch (Exception e)
             {
@@ -352,6 +357,21 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             {
                 throw new ArgumentException($"ProfileId '{profileId}' is invalid. Nested directories and special characters are not allowed.", nameof(profileId));
             }
+        }
+
+        /// <summary>
+        /// Returns the save file's last-write time (UTC) for a profile, falling back to the backup file's time when the primary save is missing. 
+        /// Returns null when neither exists (the profile has no loadable save).
+        /// </summary>
+        private DateTime? GetSaveMtime(DirectoryInfo profileDir, string fileName, string backupName)
+        {
+            FileInfo save = new(Path.Combine(profileDir.FullName, fileName));
+            if (save.Exists) return save.LastWriteTimeUtc;
+
+            FileInfo backup = new(Path.Combine(profileDir.FullName, backupName));
+            if (backup.Exists) return backup.LastWriteTimeUtc;
+
+            return null;
         }
 
         #endregion

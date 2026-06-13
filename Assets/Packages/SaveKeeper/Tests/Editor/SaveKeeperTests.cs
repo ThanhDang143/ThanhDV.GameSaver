@@ -757,6 +757,260 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             yield return WaitForOperation(saveHandle);
         }
 
+        // ----- Save/Load mutual exclusion (a load claims the profile's pipeline slot) -----
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WhileLoadingSameProfile_CompletesFailed()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-load-lock", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle loadHandle = _SaveKeeper.LoadAsync("profile-load-lock");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 1, "load did not reach ReadAsync");
+
+            // Save the same profile while a load is in flight — must fail (handle Failed), never capture mid-restore.
+            SaveKeeperOperationHandle saveHandle = _SaveKeeper.SaveAsync("profile-load-lock");
+            yield return WaitForOperation(saveHandle);
+
+            Assert.That(saveHandle.Status, Is.EqualTo(SaveKeeperOperationStatus.Failed));
+            Assert.That(saveHandle.Error, Is.TypeOf<InvalidOperationException>());
+            Assert.That(saveHandle.Error.Message, Does.Contain("load operation is in flight"));
+
+            // The rejected save must NOT release the load's slot — the load still completes.
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(loadHandle);
+            Assert.That(loadHandle.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded),
+                "Load should complete normally after a conflicting save was rejected.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WhileLoadingDifferentProfile_Succeeds()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-loading", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle loadHandle = _SaveKeeper.LoadAsync("profile-loading");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 1, "load did not reach ReadAsync");
+
+            // Save a DIFFERENT profile while a load is in flight — no conflict, must succeed.
+            SaveKeeperOperationHandle saveHandle = _SaveKeeper.SaveAsync("profile-other");
+            yield return WaitForOperation(saveHandle);
+
+            Assert.That(saveHandle.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(loadHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator SaveImmediate_WhileLoadingSameProfile_Throws()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-load-lock", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle loadHandle = _SaveKeeper.LoadAsync("profile-load-lock");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 1, "load did not reach ReadAsync");
+
+            // SaveImmediate for the same profile while a load is in flight — must throw.
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => _SaveKeeper.SaveImmediate("profile-load-lock"));
+            Assert.That(ex.Message, Does.Contain("in flight"));
+
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(loadHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhileLoadingSameProfile_CompletesFailed()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-double-load", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle firstLoad = _SaveKeeper.LoadAsync("profile-double-load");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 1, "first load did not reach ReadAsync");
+
+            // Second load of the same profile while the first is in flight — must fail.
+            SaveKeeperOperationHandle secondLoad = _SaveKeeper.LoadAsync("profile-double-load");
+            yield return WaitForOperation(secondLoad);
+
+            Assert.That(secondLoad.Status, Is.EqualTo(SaveKeeperOperationStatus.Failed));
+            Assert.That(secondLoad.Error, Is.TypeOf<InvalidOperationException>());
+            Assert.That(secondLoad.Error.Message, Does.Contain("another load operation is in flight"));
+
+            // The rejected second load must NOT release the first load's slot.
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(firstLoad);
+            Assert.That(firstLoad.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_WhileLoadingDifferentProfile_Succeeds()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData a = new();
+            a.ObjectData["player"] = new TestSaveData { Value = 5 };
+            SaveData b = new();
+            b.ObjectData["player"] = new TestSaveData { Value = 9 };
+            _storage.SetPrimaryFile("profile-A", SaveFileName, _serializer.RegisterSerializedValue(a));
+            _storage.SetPrimaryFile("profile-B", SaveFileName, _serializer.RegisterSerializedValue(b));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle loadA = _SaveKeeper.LoadAsync("profile-A");
+            SaveKeeperOperationHandle loadB = _SaveKeeper.LoadAsync("profile-B");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 2, "both loads did not reach ReadAsync");
+
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(loadA);
+            yield return WaitForOperation(loadB);
+
+            Assert.That(loadA.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+            Assert.That(loadB.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+        }
+
+        [UnityTest]
+        public IEnumerator DeleteProfile_WhileLoadingSameProfile_Throws()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-load-lock", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            _storage.HoldReadAsync();
+            SaveKeeperOperationHandle loadHandle = _SaveKeeper.LoadAsync("profile-load-lock");
+            yield return WaitForCondition(() => _storage.ReadAsyncEnteredCount >= 1, "load did not reach ReadAsync");
+
+            // Delete the same profile while a load is in flight — must throw (new: previously only blocked on save).
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
+                () => _SaveKeeper.DeleteProfile("profile-load-lock"));
+            Assert.That(ex.Message, Does.Contain("in flight"));
+            Assert.That(_storage.DeleteProfileCalls, Is.Empty, "Delete must not happen while a load is in flight.");
+
+            _storage.ReleaseReadAsync();
+            yield return WaitForOperation(loadHandle);
+        }
+
+        [UnityTest]
+        public IEnumerator LoadAsync_AfterCompletion_ReleasesSlot_AllowsSave()
+        {
+            _registry.Register(new TestSavable("player", new TestSaveData { Value = 1 }));
+
+            SaveData stored = new();
+            stored.ObjectData["player"] = new TestSaveData { Value = 5 };
+            _storage.SetPrimaryFile("profile-seq", SaveFileName, _serializer.RegisterSerializedValue(stored));
+
+            // Load fully completes (no read gate held) → the load slot must be released in the finally.
+            SaveKeeperOperationHandle loadHandle = _SaveKeeper.LoadAsync("profile-seq");
+            yield return WaitForOperation(loadHandle);
+            Assert.That(loadHandle.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+
+            // A save for the same profile now succeeds, proving the slot was released.
+            SaveKeeperOperationHandle saveHandle = _SaveKeeper.SaveAsync("profile-seq");
+            yield return WaitForOperation(saveHandle);
+            Assert.That(saveHandle.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+        }
+
+        // ----- #5: user code (CaptureData/RestoreData) runs OFF _stateLock; capture at call site on the main thread -----
+
+        [Test]
+        public void SaveImmediate_WhenCaptureDataThrows_ReleasesSlot()
+        {
+            ThrowingCaptureSavable thrower = new("player");
+            _registry.Register(thrower);
+
+            // CaptureData throws → SaveImmediate (a sync API) propagates it.
+            Assert.Throws<CaptureBoomException>(() => _SaveKeeper.SaveImmediate("profile-throw"));
+
+            // ...but the ImmediateSave slot must have been released by the finally block. If it leaked, the next
+            // call would throw "... while another save or load operation is in flight" instead of succeeding.
+            thrower.ThrowOnCapture = false;
+            Assert.DoesNotThrow(() => _SaveKeeper.SaveImmediate("profile-throw"));
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_WhenCaptureDataThrows_CompletesFailed_DoesNotThrowSynchronously()
+        {
+            ThrowingCaptureSavable thrower = new("player");
+            _registry.Register(thrower);
+
+            // SaveAsync must NOT throw synchronously — the CaptureData error is routed into the handle.
+            SaveKeeperOperationHandle handle = default;
+            Assert.DoesNotThrow(() => handle = _SaveKeeper.SaveAsync("profile-throw"));
+            yield return WaitForOperation(handle);
+
+            Assert.That(handle.Status, Is.EqualTo(SaveKeeperOperationStatus.Failed));
+            Assert.That(handle.Error, Is.TypeOf<CaptureBoomException>());
+
+            // Capture runs before the slot is claimed, so no slot leaked — a later save succeeds.
+            thrower.ThrowOnCapture = false;
+            SaveKeeperOperationHandle ok = _SaveKeeper.SaveAsync("profile-throw");
+            yield return WaitForOperation(ok);
+            Assert.That(ok.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_CaptureRunsOnMainThread_IncludingCoalesced()
+        {
+            int mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+            ThreadRecordingSavable savable = new("player");
+            _registry.Register(savable);
+
+            _storage.HoldWriteAsync();
+            SaveKeeperOperationHandle h1 = _SaveKeeper.SaveAsync("profile-thread");
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
+
+            SaveKeeperOperationHandle h2 = _SaveKeeper.SaveAsync("profile-thread"); // coalesced — also captures at call site
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+
+            Assert.That(savable.CaptureThreadIds, Is.Not.Empty);
+            Assert.That(savable.CaptureThreadIds, Is.All.EqualTo(mainThreadId),
+                "Every CaptureData() (leading + coalesced) must run on the main thread — never a threadpool continuation.");
+        }
+
+        [UnityTest]
+        public IEnumerator SaveAsync_CoalescedCapturesAtCallTime_NotTrailingExecution()
+        {
+            SnapshottingSavable savable = new("player") { CurrentValue = 1 };
+            _registry.Register(savable);
+            _storage.HoldWriteAsync();
+
+            SaveKeeperOperationHandle h1 = _SaveKeeper.SaveAsync("profile-calltime"); // leading captures 1
+            yield return WaitForCondition(() => _storage.WriteAsyncEnteredCount >= 1, "leading did not reach WriteAsync");
+
+            savable.CurrentValue = 50;
+            SaveKeeperOperationHandle h2 = _SaveKeeper.SaveAsync("profile-calltime"); // coalesced captures 50 at call time
+            savable.CurrentValue = 99;                                               // mutate AFTER the coalesced call
+
+            _storage.ReleaseWriteAsync();
+            yield return WaitForOperation(h1);
+            yield return WaitForOperation(h2);
+
+            SaveData lastSaveData = _serializer.GetLastSerializedObject<SaveData>();
+            Assert.That(lastSaveData, Is.Not.Null);
+            Assert.That(((TestSaveData)lastSaveData.ObjectData["player"]).Value, Is.EqualTo(50),
+                "Trailing save reflects state captured at the coalesced call (50), not a later mutation (99) nor the leading value (1).");
+        }
+
         [UnityTest]
         public IEnumerator WaitForPendingOperationsAsync_NoSaveInFlight_CompletesImmediately()
         {
@@ -1839,6 +2093,13 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
 
             public int WriteAsyncEnteredCount => _writeAsyncEnteredCount;
 
+            // Concurrency test infrastructure: a gate that holds ReadAsync/ReadBackupAsync calls until released.
+            // Use HoldReadAsync/ReleaseReadAsync to park a load mid-flight (the read happens before _curProfileId/restore).
+            private TaskCompletionSource<bool> _readAsyncGate;
+            private int _readAsyncEnteredCount;
+
+            public int ReadAsyncEnteredCount => _readAsyncEnteredCount;
+
             /// <summary>
             /// Starts holding all subsequent WriteAsync calls at a gate. Call ReleaseWriteAsync to let them proceed.
             /// </summary>
@@ -1854,6 +2115,24 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             {
                 TaskCompletionSource<bool> gate = _writeAsyncGate;
                 _writeAsyncGate = null;
+                gate?.TrySetResult(true);
+            }
+
+            /// <summary>
+            /// Starts holding all subsequent ReadAsync/ReadBackupAsync calls at a gate. Call ReleaseReadAsync to let them proceed.
+            /// </summary>
+            public void HoldReadAsync()
+            {
+                _readAsyncGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            /// <summary>
+            /// Releases all read calls currently waiting at the gate, and stops holding new ones.
+            /// </summary>
+            public void ReleaseReadAsync()
+            {
+                TaskCompletionSource<bool> gate = _readAsyncGate;
+                _readAsyncGate = null;
                 gate?.TrySetResult(true);
             }
 
@@ -1897,16 +2176,26 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
                 RestoreBackupCalls.Add((profileId, fileName));
             }
 
-            public Task<string> ReadAsync(string profileId, string fileName)
+            public async Task<string> ReadAsync(string profileId, string fileName)
             {
+                System.Threading.Interlocked.Increment(ref _readAsyncEnteredCount);
                 ReadAsyncCalls.Add((profileId, fileName));
-                return Task.FromResult(_primaryFiles[(profileId, fileName)]);
+
+                TaskCompletionSource<bool> gate = _readAsyncGate;
+                if (gate != null) await gate.Task;
+
+                return _primaryFiles[(profileId, fileName)];
             }
 
-            public Task<string> ReadBackupAsync(string profileId, string fileName)
+            public async Task<string> ReadBackupAsync(string profileId, string fileName)
             {
+                System.Threading.Interlocked.Increment(ref _readAsyncEnteredCount);
                 ReadBackupCalls.Add((profileId, fileName));
-                return Task.FromResult(_backupFiles[(profileId, fileName)]);
+
+                TaskCompletionSource<bool> gate = _readAsyncGate;
+                if (gate != null) await gate.Task;
+
+                return _backupFiles[(profileId, fileName)];
             }
 
             public void DeleteProfile(string profileId)
@@ -1953,7 +2242,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
                 return ProfileIds;
             }
 
-            public string GetMostRecentProfileId()
+            public string GetMostRecentProfileId(string fileName)
             {
                 return MostRecentProfileId;
             }
@@ -2123,6 +2412,53 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
                 RestoreCallCount++;
                 LastRestoredData = data;
             }
+        }
+
+        /// <summary>Distinctive exception thrown by <see cref="ThrowingCaptureSavable"/> so tests can match it precisely.</summary>
+        private sealed class CaptureBoomException : Exception { }
+
+        /// <summary>Savable whose CaptureData() throws while <see cref="ThrowOnCapture"/> is true.</summary>
+        private sealed class ThrowingCaptureSavable : ISavable
+        {
+            public ThrowingCaptureSavable(string saveKey) => SaveKey = saveKey;
+            public string SaveKey { get; }
+            public bool ThrowOnCapture = true;
+
+            public ISaveData CaptureData()
+            {
+                if (ThrowOnCapture) throw new CaptureBoomException();
+                return new TestSaveData { Value = 1 };
+            }
+
+            public void RestoreData(ISaveData data) { }
+        }
+
+        /// <summary>Records the managed thread id of every CaptureData() call so tests can assert main-thread execution.</summary>
+        private sealed class ThreadRecordingSavable : ISavable
+        {
+            public ThreadRecordingSavable(string saveKey) => SaveKey = saveKey;
+            public string SaveKey { get; }
+            public readonly List<int> CaptureThreadIds = new();
+
+            public ISaveData CaptureData()
+            {
+                lock (CaptureThreadIds) CaptureThreadIds.Add(System.Threading.Thread.CurrentThread.ManagedThreadId);
+                return new TestSaveData { Value = 1 };
+            }
+
+            public void RestoreData(ISaveData data) { }
+        }
+
+        /// <summary>CaptureData() returns a fresh copy of <see cref="CurrentValue"/>, so a later mutation of the
+        /// field does not retroactively change an already-captured snapshot (unlike a shared mutable reference).</summary>
+        private sealed class SnapshottingSavable : ISavable
+        {
+            public SnapshottingSavable(string saveKey) => SaveKey = saveKey;
+            public string SaveKey { get; }
+            public int CurrentValue;
+
+            public ISaveData CaptureData() => new TestSaveData { Value = CurrentValue };
+            public void RestoreData(ISaveData data) { }
         }
 
         private sealed class TestSaveData : ISaveData
