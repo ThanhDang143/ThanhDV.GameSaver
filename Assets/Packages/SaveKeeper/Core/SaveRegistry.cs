@@ -8,7 +8,7 @@ namespace ThanhDV.SaveKeeper.Core
     /// <summary>
     /// Manages the registration and tracking of all <see cref="ISavable"/> objects in the game.
     /// </summary>
-    public class SaveRegistry
+    public class SaveRegistry : ISaveRegistry
     {
         /// <summary>
         /// Primary storage keyed by <see cref="ISavable.SaveKey"/>.
@@ -61,7 +61,7 @@ namespace ThanhDV.SaveKeeper.Core
 
                 if (prunedCount > 0)
                 {
-                    DebugLog.Warning($"SaveRegistry pruned {prunedCount} dead reference(s). Make sure to call Unregister() for any ISavable instances.");
+                    SKLogger.Warning($"SaveRegistry pruned {prunedCount} dead reference(s). Make sure to call Unregister() for any ISavable instances.");
                 }
 
                 return snapshot;
@@ -125,7 +125,7 @@ namespace ThanhDV.SaveKeeper.Core
 
             if (autoReplaced)
             {
-                DebugLog.Warning($"SaveRegistry auto-replaced dead reference for SaveKey '{key}'. Make sure to call Unregister() for any ISavable instances.");
+                SKLogger.Warning($"SaveRegistry auto-replaced dead reference for SaveKey '{key}'. Make sure to call Unregister() for any ISavable instances.");
             }
 
             if (shouldFireEvent) OnSavableRegistered?.Invoke(savable);
@@ -180,7 +180,7 @@ namespace ThanhDV.SaveKeeper.Core
 
             if (keyChanged)
             {
-                DebugLog.Warning($"SaveKey was changed since Register for '{savable.GetType().FullName}'. SaveKey must be immutable after registration.");
+                SKLogger.Warning($"SaveKey was changed since Register for '{savable.GetType().FullName}'. SaveKey must be immutable after registration.");
             }
 
             if (removed) OnSavableUnregistered?.Invoke(savable);

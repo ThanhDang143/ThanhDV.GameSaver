@@ -436,7 +436,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             UnityEngine.Object.DestroyImmediate(go);
 
             ISavable replacement = new TestPocoSavable("replace-key");
-            LogAssert.Expect(LogType.Log, new Regex(".*auto-replaced.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*auto-replaced.*"));
             _registry.Register(replacement);
 
             Assert.AreEqual(1, _registry.Savables.Count);
@@ -457,7 +457,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             ISavable eventArg = null;
             _registry.OnSavableRegistered += s => eventArg = s;
 
-            LogAssert.Expect(LogType.Log, new Regex(".*auto-replaced.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*auto-replaced.*"));
             _registry.Register(replacement);
 
             Assert.AreSame(replacement, eventArg,
@@ -474,7 +474,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             UnityEngine.Object.DestroyImmediate(go);
 
             // Pattern phải khớp cả "auto-replaced" và key cụ thể → đảm bảo warning có thông tin debug
-            LogAssert.Expect(LogType.Log, new Regex(".*auto-replaced.*warn-key.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*auto-replaced.*warn-key.*"));
             _registry.Register(new TestPocoSavable("warn-key"));
         }
 
@@ -489,7 +489,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             _registry.Register(savable);
             savable.ChangeKey("changed");
 
-            LogAssert.Expect(LogType.Log, new Regex(".*SaveKey was changed.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*SaveKey was changed.*"));
             _registry.Unregister(savable);
 
             Assert.AreEqual(0, _registry.Savables.Count,
@@ -503,7 +503,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             _registry.Register(savable);
             savable.ChangeKey("k2");
 
-            LogAssert.Expect(LogType.Log, new Regex(".*SaveKey was changed.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*SaveKey was changed.*"));
             _registry.Unregister(savable);
         }
 
@@ -517,7 +517,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             ISavable captured = null;
             _registry.OnSavableUnregistered += s => captured = s;
 
-            LogAssert.Expect(LogType.Log, new Regex(".*SaveKey was changed.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*SaveKey was changed.*"));
             _registry.Unregister(savable);
 
             Assert.AreSame(savable, captured);

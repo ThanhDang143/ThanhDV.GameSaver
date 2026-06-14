@@ -4,10 +4,10 @@ using UnityEngine;
 using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
 
-namespace ThanhDV.SaveKeeper.Core
+namespace ThanhDV.SaveKeeper.AutoSave
 {
     /// <summary>
-    /// Static PlayerLoop-driven dispatcher that ticks every active SaveKeeper instance each Update frame.
+    /// Static PlayerLoop-driven dispatcher that ticks every active <see cref="SKAutoSave"/> each Update frame.
     /// Uses no MonoBehaviour or GameObject — keeps the library out of the scene tree.
     /// </summary>
     internal static class AutoSaveTicker
@@ -17,19 +17,20 @@ namespace ThanhDV.SaveKeeper.Core
         /// </summary>
         private struct AutoSaveTickerMarker { }
 
-        private static readonly List<SaveKeeper> _subscribers = new();
+        private static readonly List<SKAutoSave> _subscribers = new();
         private static readonly object _lock = new();
         private static bool _installed;
 
         /// <summary>
-        /// Registers a SaveKeeper for per-frame ticks. Installs the PlayerLoop hook on first subscriber.
+        /// Registers a service for per-frame ticks. Installs the PlayerLoop hook on the first subscriber.
         /// </summary>
-        public static void Subscribe(SaveKeeper SaveKeeper)
+        public static void Subscribe(SKAutoSave service)
         {
             lock (_lock)
             {
-                if (_subscribers.Contains(SaveKeeper)) return;
-                _subscribers.Add(SaveKeeper);
+                if (_subscribers.Contains(service)) return;
+
+                _subscribers.Add(service);
 
                 if (!_installed)
                 {
@@ -40,13 +41,13 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Unregisters a SaveKeeper. Removes the PlayerLoop hook when the last subscriber leaves.
+        /// Unregisters a service. Removes the PlayerLoop hook when the last subscriber leaves.
         /// </summary>
-        public static void Unsubscribe(SaveKeeper SaveKeeper)
+        public static void Unsubscribe(SKAutoSave service)
         {
             lock (_lock)
             {
-                _subscribers.Remove(SaveKeeper);
+                _subscribers.Remove(service);
 
                 if (_subscribers.Count <= 0 && _installed)
                 {
@@ -58,17 +59,17 @@ namespace ThanhDV.SaveKeeper.Core
 
         /// <summary>
         /// Invoked by Unity's PlayerLoop every Update frame. Snapshots subscribers outside the lock so
-        /// AutoSaveTick callbacks may freely subscribe / unsubscribe without breaking the iteration.
+        /// Tick callbacks may freely subscribe / unsubscribe without breaking the iteration.
         /// </summary>
         private static void OnTick()
         {
-            SaveKeeper[] snapshot;
+            SKAutoSave[] snapshot;
             lock (_lock) snapshot = _subscribers.ToArray();
 
             float deltaTime = Time.unscaledDeltaTime;
-            foreach (SaveKeeper saver in snapshot)
+            foreach (SKAutoSave service in snapshot)
             {
-                saver.AutoSaveTick(deltaTime);
+                service.Tick(deltaTime);
             }
         }
 
@@ -90,12 +91,12 @@ namespace ThanhDV.SaveKeeper.Core
                 PlayerLoopSystem subSystem = rootLoop.subSystemList[i];
                 if (subSystem.type != typeof(Update)) continue;
 
-
                 List<PlayerLoopSystem> subs = subSystem.subSystemList?.ToList() ?? new();
                 if (subs.Any(s => s.type == typeof(AutoSaveTickerMarker))) return;
 
                 subs.Add(tickSystem);
                 subSystem.subSystemList = subs.ToArray();
+                rootLoop.subSystemList[i] = subSystem;
                 break;
             }
 
@@ -114,8 +115,8 @@ namespace ThanhDV.SaveKeeper.Core
                 PlayerLoopSystem subSystem = rootLoop.subSystemList[i];
                 if (subSystem.type != typeof(Update)) continue;
 
-                PlayerLoopSystem[] subs = subSystem.subSystemList?.Where(s => s.type != typeof(AutoSaveTickerMarker)).ToArray();
-                subSystem.subSystemList = subs;
+                subSystem.subSystemList = subSystem.subSystemList?.Where(s => s.type != typeof(AutoSaveTickerMarker)).ToArray();
+                rootLoop.subSystemList[i] = subSystem;
                 break;
             }
 

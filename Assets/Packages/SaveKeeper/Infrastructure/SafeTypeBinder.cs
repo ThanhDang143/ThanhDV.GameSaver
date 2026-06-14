@@ -221,11 +221,11 @@ namespace ThanhDV.SaveKeeper.Infrastructure
                     // Some types in this assembly failed to load (missing dependency, etc.).
                     // Use only the types that did load — partial scan is better than aborting.
                     types = ex.Types.Where(t => t != null).ToArray();
-                    DebugLog.Warning($"SafeTypeBinder partial type load in assembly '{assembly.GetName().Name}'. {types.Length} types loaded, {ex.LoaderExceptions?.Length ?? 0} failures skipped.");
+                    SKLogger.Warning($"SafeTypeBinder partial type load in assembly '{assembly.GetName().Name}'. {types.Length} types loaded, {ex.LoaderExceptions?.Length ?? 0} failures skipped.");
                 }
                 catch (Exception ex)
                 {
-                    DebugLog.Warning($"SafeTypeBinder failed to enumerate types in assembly '{assembly.GetName().Name}': {ex.Message}. Skipped.");
+                    SKLogger.Warning($"SafeTypeBinder failed to enumerate types in assembly '{assembly.GetName().Name}': {ex.Message}. Skipped.");
                     continue;
                 }
 
@@ -245,11 +245,11 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
             if (elapsedMs > SLOW_SCAN_THRESHOLD_MS)
             {
-                DebugLog.Warning($"SafeTypeBinder scan took {elapsedMs}ms ({registeredCount} types, {assembliesScanned} assemblies) — exceeds {SLOW_SCAN_THRESHOLD_MS}ms budget.");
+                SKLogger.Warning($"SafeTypeBinder scan took {elapsedMs}ms ({registeredCount} types, {assembliesScanned} assemblies) — exceeds {SLOW_SCAN_THRESHOLD_MS}ms budget.");
             }
             else
             {
-                DebugLog.Success($"SafeTypeBinder scan complete in {elapsedMs}ms ({registeredCount} types, {assembliesScanned} assemblies).");
+                SKLogger.Success($"SafeTypeBinder scan complete in {elapsedMs}ms ({registeredCount} types, {assembliesScanned} assemblies).");
             }
         }
 

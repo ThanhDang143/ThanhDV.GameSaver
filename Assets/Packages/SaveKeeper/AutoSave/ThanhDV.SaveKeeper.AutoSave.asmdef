@@ -1,0 +1,17 @@
+{
+	"name": "ThanhDV.SaveKeeper.AutoSave",
+	"rootNamespace": "ThanhDV.SaveKeeper.AutoSave",
+	"references": [
+		"GUID:b94cf75cc62c7154faf8c40a883ed3af",
+		"GUID:5d90c741d2687574da2e3cda1775085c"
+	],
+	"includePlatforms": [],
+	"excludePlatforms": [],
+	"allowUnsafeCode": false,
+	"overrideReferences": false,
+	"precompiledReferences": [],
+	"autoReferenced": true,
+	"defineConstraints": [],
+	"versionDefines": [],
+	"noEngineReferences": false
+}

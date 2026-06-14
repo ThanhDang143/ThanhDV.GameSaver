@@ -1,18 +1,19 @@
 {
-	"name": "ThanhDV.SaveKeeper.Singleton",
-	"rootNamespace": "ThanhDV.SaveKeeper.Singleton",
-	"references": [
-		"GUID:b94cf75cc62c7154faf8c40a883ed3af",
-		"GUID:a168dc919928102448a796c01e336fbf",
-		"GUID:5d90c741d2687574da2e3cda1775085c"
-	],
-	"includePlatforms": [],
-	"excludePlatforms": [],
-	"allowUnsafeCode": false,
-	"overrideReferences": false,
-	"precompiledReferences": [],
-	"autoReferenced": true,
-	"defineConstraints": [],
-	"versionDefines": [],
-	"noEngineReferences": false
+    "name": "ThanhDV.SaveKeeper.Singleton",
+    "rootNamespace": "ThanhDV.SaveKeeper.Singleton",
+    "references": [
+        "GUID:b94cf75cc62c7154faf8c40a883ed3af",
+        "GUID:a168dc919928102448a796c01e336fbf",
+        "GUID:5d90c741d2687574da2e3cda1775085c",
+        "GUID:63c2073a9d3404e49b9db5ccb1fc2e22"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

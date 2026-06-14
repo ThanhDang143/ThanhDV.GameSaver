@@ -5,21 +5,18 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ThanhDV.SaveKeeper.Common;
-using UnityEngine;
 
 namespace ThanhDV.SaveKeeper.Core
 {
     public class SaveKeeper : ISaveKeeper
     {
-        private readonly SaveRegistry _registry;
+        private readonly ISaveRegistry _registry;
         private readonly IStorageProvider _storageProvider;
         private readonly ISerializer _serializer;
         private readonly IEncryptionProvider _encryptionProvider;
         private readonly SaveSettings _settings;
 
         private SaveData _curSaveData = new();
-        private string _curProfileId;
-        private float _autoSaveCountdown;
 
         /// <summary>
         /// Highest observed UTC time, used to detect backward clock changes.
@@ -37,6 +34,11 @@ namespace ThanhDV.SaveKeeper.Core
         /// LoadAsync throws when dirty to prevent data loss — use <c>discardUnsavedChanges: true</c> to skip.
         /// </summary>
         private bool _isSimpleDataDirty; public bool IsSimpleDataDirty => _isSimpleDataDirty;
+
+        /// <summary>
+        /// The profile currently active for implicit saves, or null when none is active. Read under _stateLock.
+        /// </summary>
+        private string _curProfileId; public string CurrentProfileId { get { lock (_stateLock) return _curProfileId; } }
 
         /// <summary>
         /// Caller's SynchronizationContext captured at construction. Used to marshal OnSaveCompleted
@@ -70,7 +72,7 @@ namespace ThanhDV.SaveKeeper.Core
         /// It manages serialization, storage, and persistence operations. Subscribing to registry changes enables 
         /// automatic restoration of newly registered objects and captures state for the ones being unregistered.
         /// </summary>
-        public SaveKeeper(SaveRegistry registry, IStorageProvider storageProvider, ISerializer serializer, IEncryptionProvider encryptionProvider, SaveSettings settings)
+        public SaveKeeper(ISaveRegistry registry, IStorageProvider storageProvider, ISerializer serializer, IEncryptionProvider encryptionProvider, SaveSettings settings)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _storageProvider = storageProvider ?? throw new ArgumentNullException(nameof(storageProvider));
@@ -79,14 +81,8 @@ namespace ThanhDV.SaveKeeper.Core
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _capturedContext = SynchronizationContext.Current;
 
-            _registry.OnSavableRegistered += HandleRegistration;
-            _registry.OnSavableUnregistered += HandleUnregistration;
-
-            Application.quitting += HandleApplicationQuitting;
-            Application.focusChanged += HandleFocusChanged;
-
-            ResetAutoSaveCountdown();
-            AutoSaveTicker.Subscribe(this);
+            _registry.OnSavableRegistered += OnSavableRegistered;
+            _registry.OnSavableUnregistered += OnSavableUnregistered;
         }
 
         #region Profile Management
@@ -157,7 +153,7 @@ namespace ThanhDV.SaveKeeper.Core
                 _profileStates.Remove(profileId);
             }
 
-            DebugLog.Success($"Successfully deleted profile: {profileId}");
+            SKLogger.Success($"Successfully deleted profile: {profileId}");
         }
 
         #endregion
@@ -301,11 +297,17 @@ namespace ThanhDV.SaveKeeper.Core
 
                 NotifySaveCompleted(targetProfile);
 
-                DebugLog.Success("Immediate save operation successful!");
+                SKLogger.Success("Immediate save operation successful!");
+            }
+            catch (InvalidOperationException)
+            {
+                // Expected rejection (e.g. no valid profile, concurrent save). Caller sees it via the thrown
+                // exception — don't surface as Error to avoid polluting crash reporters with caller misuse.
+                throw;
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Immediate save failed: {e.Message}");
+                SKLogger.Error($"Immediate save failed: {e.Message}");
                 throw;
             }
             finally
@@ -469,7 +471,7 @@ namespace ThanhDV.SaveKeeper.Core
                 iterations++;
                 if (iterations > 2)
                 {
-                    DebugLog.Warning($"Save trailing loop running iteration #{iterations} for profile '{targetProfile}' — possible reentrancy.");
+                    SKLogger.Warning($"Save trailing loop running iteration #{iterations} for profile '{targetProfile}' — possible reentrancy.");
                 }
 
                 // Trailing pipeline is never "implicit" — it always targets the resolved profile explicitly.
@@ -636,13 +638,19 @@ namespace ThanhDV.SaveKeeper.Core
                     internalOp.PercentComplete = 1f;
                 }
 
-                DebugLog.Success($"Successfully loaded {(isBackup ? "Backup" : "Primary")} data for Profile: {profileId}");
+                SKLogger.Success($"Successfully loaded {(isBackup ? "Backup" : "Primary")} data for Profile: {profileId}");
 
                 internalOp.Complete();
             }
+            catch (InvalidOperationException e)
+            {
+                // Expected rejection (e.g. no profile id, load/save already in flight). Caller observes it via
+                // the operation handle — don't surface as Error to avoid polluting crash reporters.
+                internalOp.Complete(e);
+            }
             catch (Exception e)
             {
-                DebugLog.Error($"Failed to load data: {e.Message}");
+                SKLogger.Error($"Failed to load data: {e.Message}");
 
                 internalOp.Complete(e);
             }
@@ -714,7 +722,7 @@ namespace ThanhDV.SaveKeeper.Core
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Failed to load metadata: {e.Message}");
+                SKLogger.Error($"Failed to load metadata: {e.Message}");
                 internalOp.Complete(null, e);
             }
         }
@@ -764,7 +772,7 @@ namespace ThanhDV.SaveKeeper.Core
         {
             if (string.IsNullOrEmpty(key))
             {
-                DebugLog.Error("Cannot set data: Key is null or empty.");
+                SKLogger.Warning("Cannot set data: Key is null or empty.");
                 return;
             }
 
@@ -789,7 +797,7 @@ namespace ThanhDV.SaveKeeper.Core
         {
             if (string.IsNullOrEmpty(key))
             {
-                DebugLog.Error("Cannot get data: Key is null or empty.");
+                SKLogger.Warning("Cannot get data: Key is null or empty.");
                 return defaultValue;
             }
 
@@ -808,7 +816,7 @@ namespace ThanhDV.SaveKeeper.Core
             }
             catch (Exception e)
             {
-                DebugLog.Warning($"Failed to parse data for key '{key}': {e.Message}. Returning default value.");
+                SKLogger.Warning($"Failed to parse data for key '{key}': {e.Message}. Returning default value.");
                 return defaultValue;
             }
         }
@@ -822,7 +830,7 @@ namespace ThanhDV.SaveKeeper.Core
         {
             if (string.IsNullOrEmpty(key))
             {
-                DebugLog.Error("Cannot check key: Key is null or empty.");
+                SKLogger.Warning("Cannot check key: Key is null or empty.");
                 return false;
             }
 
@@ -837,7 +845,7 @@ namespace ThanhDV.SaveKeeper.Core
         {
             if (string.IsNullOrEmpty(key))
             {
-                DebugLog.Error("Cannot delete data: Key is null or empty.");
+                SKLogger.Warning("Cannot delete data: Key is null or empty.");
                 return;
             }
 
@@ -857,7 +865,7 @@ namespace ThanhDV.SaveKeeper.Core
         /// Automatically forces a restoration into its context based on the current parsed save data.
         /// </summary>
         /// <param name="savable">The newly observed object.</param>
-        private void HandleRegistration(ISavable savable)
+        private void OnSavableRegistered(ISavable savable)
         {
             ISaveData saveData;
             bool found;
@@ -871,7 +879,7 @@ namespace ThanhDV.SaveKeeper.Core
         /// Automatically forces a capture of its context back into the global save data cache beforehand so state isn't lost.
         /// </summary>
         /// <param name="savable">The object preparing to detach.</param>
-        private void HandleUnregistration(ISavable savable)
+        private void OnSavableUnregistered(ISavable savable)
         {
             ISaveData saveData = savable.CaptureData();
             if (saveData == null) return;
@@ -884,86 +892,13 @@ namespace ThanhDV.SaveKeeper.Core
         /// </summary>
         public void Dispose()
         {
-            _registry.OnSavableRegistered -= HandleRegistration;
-            _registry.OnSavableUnregistered -= HandleUnregistration;
-
-            Application.quitting -= HandleApplicationQuitting;
-            Application.focusChanged -= HandleFocusChanged;
-
-            AutoSaveTicker.Unsubscribe(this);
+            _registry.OnSavableRegistered -= OnSavableRegistered;
+            _registry.OnSavableUnregistered -= OnSavableUnregistered;
         }
 
         #endregion
 
         #region Helper
-
-        /// <summary>
-        /// Handles the application's quitting event by performing a best-effort save flush.
-        /// </summary>
-        private void HandleApplicationQuitting()
-        {
-            if (!_settings.AutoSaveOnQuit) return;
-
-            ProcessAutoSave();
-        }
-
-        /// <summary>
-        /// On mobile, flushes pending saves when focus is lost (app going to background may be OS-killed).
-        /// Skipped on desktop where focus changes are transient (alt-tab, click outside).
-        /// </summary>
-        /// <param name="focused">True on focus gain; false on focus loss.</param>
-        private void HandleFocusChanged(bool focused)
-        {
-            if (focused) return;
-            if (!Application.isMobilePlatform) return;
-            if (!_settings.AutoSaveOnQuit) return;
-
-            ProcessAutoSave();
-        }
-
-        /// <summary>
-        /// Drains in-flight async saves (bounded by AutoSaveOnQuitTimeout), then forces a final SaveImmediate.
-        /// Shared between quit and mobile-focus-loss handlers.
-        /// </summary>
-        /// <remarks>
-        /// Handle callbacks may fire after this returns (during shutdown/pause) — harmless since data
-        /// is already persisted. For guaranteed save-before-quit, call <see cref="WaitForPendingOperationsAsync"/> proactively.
-        /// </remarks>
-        private void ProcessAutoSave()
-        {
-            int timeout = _settings.AutoSaveOnQuitTimeout;
-
-            Task[] tasks;
-            lock (_stateLock)
-            {
-                tasks = _profileStates.Values.Select(s => s.RunningTask).Where(t => t != null).ToArray();
-            }
-
-            if (tasks.Length > 0)
-            {
-                try
-                {
-                    Task.WaitAll(tasks, timeout);
-                }
-                catch
-                {
-                    // per-task errors already routed to each handle
-                }
-            }
-
-            try
-            {
-                SaveImmediate();
-            }
-            catch (InvalidOperationException)
-            {
-                DebugLog.Warning("AutoSaveOnQuit has been skipped (no current profile, or async drain timed out).");
-            }
-            catch (Exception e)
-            {
-                DebugLog.Error($"AutoSaveOnQuit has failed: {e.Message}");
-            }
-        }
 
         /// <summary>
         /// Restores a savable from the provided save-data snapshot.
@@ -1000,29 +935,6 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Countdown timer called each frame by <see cref="AutoSaveTicker"/>.
-        /// Uses unscaled time, so it continues even when the game is paused (Time.timeScale == 0).
-        /// Does nothing if auto-save is disabled or no profile is active.
-        /// </summary>
-        /// <param name="deltaTime">Unscaled frame time delta.</param>
-        internal void AutoSaveTick(float deltaTime)
-        {
-            if (!_settings.EnableAutoSave) return;
-            if (string.IsNullOrEmpty(_curProfileId)) return;
-
-            _autoSaveCountdown -= deltaTime;
-            if (_autoSaveCountdown > 0) return;
-
-            _ = SaveAsync();
-            ResetAutoSaveCountdown();
-        }
-
-        private void ResetAutoSaveCountdown()
-        {
-            _autoSaveCountdown = _settings.AutoSaveTime;
-        }
-
-        /// <summary>
         /// Invoked at the end of a successful save. Resets the auto-save countdown when the saved profile
         /// matches the current implicit profile, then notifies external subscribers via <see cref="OnSaveCompleted"/>.
         /// Both actions are marshaled to the captured SynchronizationContext.
@@ -1030,21 +942,16 @@ namespace ThanhDV.SaveKeeper.Core
         /// <param name="profileId">The profile that was just persisted to disk.</param>
         private void NotifySaveCompleted(string profileId)
         {
-            bool matchesCurrent;
-            lock (_stateLock) matchesCurrent = profileId == _curProfileId;
             Action<string> handler = OnSaveCompleted;
+
+            if (handler == null) return;
 
             if (_capturedContext != null && _capturedContext != SynchronizationContext.Current)
             {
-                _capturedContext.Post(_ =>
-                {
-                    if (matchesCurrent) ResetAutoSaveCountdown();
-                    handler?.Invoke(profileId);
-                }, null);
+                _capturedContext.Post(_ => { handler?.Invoke(profileId); }, null);
             }
             else
             {
-                if (matchesCurrent) ResetAutoSaveCountdown();
                 handler?.Invoke(profileId);
             }
         }
@@ -1103,7 +1010,7 @@ namespace ThanhDV.SaveKeeper.Core
             catch (Exception e)
             {
                 string label = useBackup ? "Backup" : "Primary";
-                DebugLog.Warning($"{label} save for profile '{profile}' could not be read for metadata rebuild ({e.Message}).");
+                SKLogger.Warning($"{label} save for profile '{profile}' could not be read for metadata rebuild ({e.Message}).");
                 return null;
             }
         }
@@ -1126,7 +1033,7 @@ namespace ThanhDV.SaveKeeper.Core
                 }
                 catch (Exception e)
                 {
-                    DebugLog.Warning($"Metadata of profile '{profile}' is corrupted ({e.Message}). Try rebuilding from save.");
+                    SKLogger.Warning($"Metadata of profile '{profile}' is corrupted ({e.Message}). Try rebuilding from save.");
                 }
             }
 
@@ -1145,16 +1052,16 @@ namespace ThanhDV.SaveKeeper.Core
                     string metaJson = await Task.Run(() => _serializer.Serialize(metadata)).ConfigureAwait(false);
                     await _storageProvider.WriteAsync(profile, MetaName, metaJson).ConfigureAwait(false);
 
-                    if (isFromBackup) DebugLog.Success($"Rebuilt metadata from Backup save of profile '{profile}'.");
+                    if (isFromBackup) SKLogger.Success($"Rebuilt metadata from Backup save of profile '{profile}'.");
                 }
                 catch (Exception healEx)
                 {
-                    DebugLog.Warning($"Failed to write self-healed metadata for profile '{profile}': {healEx.Message}");
+                    SKLogger.Warning($"Failed to write self-healed metadata for profile '{profile}': {healEx.Message}");
                 }
             }
             else
             {
-                DebugLog.Error($"Both Primary and Backup save of profile '{profile}' are corrupted. Skipping this Slot.");
+                SKLogger.Error($"Both Primary and Backup save of profile '{profile}' are corrupted. Skipping this Slot.");
             }
 
             return metadata;
@@ -1191,7 +1098,7 @@ namespace ThanhDV.SaveKeeper.Core
 
             if (warn)
             {
-                DebugLog.Warning($"Clock moved backward ({context}) by {delta.TotalSeconds:0.0}s (from {prev:O} to {now:O}). Save ordering may be inconsistent.");
+                SKLogger.Warning($"Clock moved backward ({context}) by {delta.TotalSeconds:0.0}s (from {prev:O} to {now:O}). Save ordering may be inconsistent.");
             }
 
             return now;

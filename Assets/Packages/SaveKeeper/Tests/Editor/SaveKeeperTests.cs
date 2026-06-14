@@ -57,6 +57,31 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         }
 
         [Test]
+        public void Constructor_AcceptsCustomISaveRegistryImpl_CapturesViaInterface()
+        {
+            // DI scenario for #12a: a user-supplied ISaveRegistry implementation must work end-to-end.
+            // Proves SaveKeeper depends on the abstraction, not on the concrete SaveRegistry class.
+            FakeRegistry fake = new();
+            SaveKeeperRuntime keeper = new(fake, _storage, _serializer, _encryption, _settings);
+
+            try
+            {
+                TestSavable savable = new("player", new TestSaveData { Value = 99 });
+                fake.Register(savable);
+
+                keeper.SaveImmediate("profile-fake", new TestSaveMeta { ProfileID = "profile-fake", LastTimeSaved = DateTime.UtcNow });
+
+                Assert.That(savable.CaptureCallCount, Is.EqualTo(1),
+                    "SaveKeeper must enumerate ISaveRegistry.Savables via the interface — not the concrete SaveRegistry.");
+                Assert.That(fake.RegisterCallCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                keeper.Dispose();
+            }
+        }
+
+        [Test]
         public void SaveImmediate_WithMetadata_CapturesSavables_WritesSaveAndMetadata()
         {
             TestSavable savable = new("player", new TestSaveData { Value = 42 });
@@ -234,9 +259,12 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         {
             _storage.MostRecentProfileId = null;
 
+            // Resolving no profile fails and logs an error; we assert the handle state, not the log.
+            LogAssert.ignoreFailingMessages = true;
             SaveKeeperOperationHandle handle = _SaveKeeper.LoadMostRecentAsync();
 
             yield return WaitForOperation(handle);
+            LogAssert.ignoreFailingMessages = false;
 
             Assert.That(handle.Status, Is.EqualTo(SaveKeeperOperationStatus.Failed));
             Assert.That(handle.Error, Is.TypeOf<FileNotFoundException>());
@@ -274,6 +302,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         {
             _storage.GetAllProfileIdsException = new InvalidOperationException("enumeration failed");
 
+            LogAssert.Expect(LogType.Error, new Regex(".*Failed to load metadata.*"));
             SaveKeeperOperationHandle<List<TestSaveMeta>> handle = _SaveKeeper.GetAllMetadataAsync<TestSaveMeta>();
 
             yield return WaitForOperation(handle);
@@ -357,6 +386,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         {
             _SaveKeeper.SetSimple("existing", 7);
 
+            // Each invalid-key operation logs a warning and no-ops; we assert the no-op, not the logs.
             _SaveKeeper.SetSimple(key, 99);
             int value = _SaveKeeper.GetSimple(key, -1);
             bool hasKey = _SaveKeeper.HasSimpleKey(key);
@@ -936,6 +966,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             _registry.Register(thrower);
 
             // CaptureData throws → SaveImmediate (a sync API) propagates it.
+            LogAssert.Expect(LogType.Error, new Regex(".*Immediate save failed.*"));
             Assert.Throws<CaptureBoomException>(() => _SaveKeeper.SaveImmediate("profile-throw"));
 
             // ...but the ImmediateSave slot must have been released by the finally block. If it leaked, the next
@@ -1080,78 +1111,9 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         }
 
         [Test]
-        public void AutoSaveCountdown_Resets_WhenSaveImmediateMatchesCurrentProfile()
+        public void Dispose_CalledTwice_DoesNotThrow()
         {
-            SetPrivateField(_SaveKeeper, "_curProfileId", "profile-current");
-            SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 42f);
-
-            _SaveKeeper.SaveImmediate("profile-current");
-
-            float countdownAfter = GetPrivateField<float>(_SaveKeeper, "_autoSaveCountdown");
-            Assert.That(countdownAfter, Is.EqualTo(_settings.AutoSaveTime).Within(0.01f),
-                "Countdown should be reset to AutoSaveTime when the save target matches the current profile.");
-        }
-
-        [Test]
-        public void AutoSaveCountdown_DoesNotReset_WhenSaveImmediateDifferentProfile()
-        {
-            SetPrivateField(_SaveKeeper, "_curProfileId", "profile-A");
-            SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 42f);
-
-            _SaveKeeper.SaveImmediate("profile-B");
-
-            float countdownAfter = GetPrivateField<float>(_SaveKeeper, "_autoSaveCountdown");
-            Assert.That(countdownAfter, Is.EqualTo(42f).Within(0.01f),
-                "Countdown must NOT reset when an explicit save targets a different profile.");
-        }
-
-        [Test]
-        public void AutoSaveTick_AutoSaveDisabled_DoesNotTriggerSave()
-        {
-            ReplaceSettings(CreateSettings(useEncryption: true, enableAutoSave: false));
-            SetPrivateField(_SaveKeeper, "_curProfileId", "profile-disabled");
-            SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
-
-            int writesBefore = _storage.WriteAsyncEnteredCount;
-            InvokeAutoSaveTick(_SaveKeeper, 100f);
-
-            Assert.AreEqual(writesBefore, _storage.WriteAsyncEnteredCount, "AutoSaveTick must not trigger a save when EnableAutoSave is false.");
-        }
-
-        [Test]
-        public void AutoSaveTick_NoCurrentProfile_DoesNotTriggerSave()
-        {
-            // SetUp creates _settings with EnableAutoSave=true (default) — no need to set it.
-            SetPrivateField<string>(_SaveKeeper, "_curProfileId", null);
-            SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
-
-            int writesBefore = _storage.WriteAsyncEnteredCount;
-            InvokeAutoSaveTick(_SaveKeeper, 100f);
-
-            Assert.AreEqual(writesBefore, _storage.WriteAsyncEnteredCount, "AutoSaveTick must not trigger a save when no profile is loaded.");
-        }
-
-        [UnityTest]
-        public IEnumerator AutoSaveTick_CountdownReached_TriggersImplicitSave()
-        {
-            ReplaceSettings(CreateSettings(useEncryption: true, enableAutoSave: true, autoSaveTime: 1f));
-            SetPrivateField(_SaveKeeper, "_curProfileId", "profile-tick");
-            SetPrivateField(_SaveKeeper, "_autoSaveCountdown", 0.1f);
-
-            int writesBefore = _storage.WriteAsyncEnteredCount;
-            InvokeAutoSaveTick(_SaveKeeper, 1f);
-
-            yield return WaitForCondition(
-                () => _storage.WriteAsyncEnteredCount > writesBefore,
-                "AutoSaveTick should have triggered SaveAsync once the countdown reached zero.");
-        }
-
-        [Test]
-        public void Dispose_UnsubscribesFromAutoSaveTicker_AndApplicationEvents()
-        {
-            // No direct introspection of static Application event lists is available in C#,
-            // so this test asserts at least that Dispose runs idempotently without throwing
-            // and that a second Dispose (after disposal) doesn't blow up.
+            // Dispose unsubscribes from the registry; calling it twice must be a safe no-op.
             Assert.DoesNotThrow(() => _SaveKeeper.Dispose());
             Assert.DoesNotThrow(() => _SaveKeeper.Dispose(), "Dispose must be safe to call twice.");
 
@@ -1808,8 +1770,11 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             _storage.SetMtime("profile-mismatch", MetaFileName, DateTime.UtcNow.AddMinutes(-5));
             _storage.SetMtime("profile-mismatch", SaveFileName, DateTime.UtcNow);
 
+            // Cast failure makes both primary and backup unreadable for this profile → logs an error and skips it.
+            LogAssert.ignoreFailingMessages = true;
             SaveKeeperOperationHandle<List<TestSaveMeta>> handle = _SaveKeeper.GetAllMetadataAsync<TestSaveMeta>();
             yield return WaitForOperation(handle);
+            LogAssert.ignoreFailingMessages = false;
 
             Assert.That(handle.Status, Is.EqualTo(SaveKeeperOperationStatus.Succeeded));
             Assert.That(handle.Result, Is.Empty,
@@ -1854,7 +1819,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             SetPrivateField(_SaveKeeper, "_lastObservedTime", futureBaseline);
 
             // Lib's next clock read (DateTime.UtcNow) is ~5s less than baseline → trigger warning.
-            LogAssert.Expect(LogType.Log, new Regex(".*Clock moved backward.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*Clock moved backward.*"));
 
             SaveKeeperOperationHandle handle = _SaveKeeper.SaveAsync("p-skew");
             yield return WaitForOperation(handle);
@@ -1914,7 +1879,7 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             yield return WaitForOperation(loadHandle);
 
             // Now save again — baseline is 1 hour in future, current UtcNow is ~now → skew detected.
-            LogAssert.Expect(LogType.Log, new Regex(".*Clock moved backward.*"));
+            LogAssert.Expect(LogType.Warning, new Regex(".*Clock moved backward.*"));
 
             SaveKeeperOperationHandle saveHandle = _SaveKeeper.SaveAsync("p-cross", new TestSaveMeta { ProfileID = "p-cross", LastTimeSaved = DateTime.UtcNow });
             yield return WaitForOperation(saveHandle);
@@ -1991,14 +1956,9 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             _SaveKeeper = new SaveKeeperRuntime(_registry, _storage, _serializer, _encryption, _settings);
         }
 
-        private static SaveSettings CreateSettings(
-            bool useEncryption,
-            bool enableAutoSave = true,
-            float autoSaveTime = 300f) => new()
+        private static SaveSettings CreateSettings(bool useEncryption) => new()
         {
             UseEncryption = useEncryption,
-            EnableAutoSave = enableAutoSave,
-            AutoSaveTime = autoSaveTime,
             FileName = "slot",
             SaveExtension = ".sav",
             MetaExtension = ".meta",
@@ -2014,12 +1974,6 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             return (T)field.GetValue(target);
-        }
-
-        private static void InvokeAutoSaveTick(SaveKeeperRuntime SaveKeeper, float deltaTime)
-        {
-            MethodInfo method = typeof(SaveKeeperRuntime).GetMethod("AutoSaveTick", BindingFlags.Instance | BindingFlags.NonPublic);
-            method.Invoke(SaveKeeper, new object[] { deltaTime });
         }
 
         private static IEnumerator WaitForOperation(SaveKeeperOperationHandle handle, float timeoutSeconds = 1f)
@@ -2383,6 +2337,37 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             {
                 DecryptInputs.Add(cipherText);
                 return cipherText.StartsWith("enc::", StringComparison.Ordinal) ? cipherText.Substring(5) : cipherText;
+            }
+        }
+
+        /// <summary>
+        /// Minimal <see cref="ISaveRegistry"/> stub for the #12a DI scenario test. Records call counts and
+        /// fires the same events <see cref="SaveRegistry"/> would, so SaveKeeper's subscription path is exercised.
+        /// </summary>
+        private sealed class FakeRegistry : ISaveRegistry
+        {
+            private readonly List<ISavable> _savables = new();
+
+            public event Action<ISavable> OnSavableRegistered;
+            public event Action<ISavable> OnSavableUnregistered;
+
+            public int RegisterCallCount { get; private set; }
+            public int UnregisterCallCount { get; private set; }
+
+            public IReadOnlyList<ISavable> Savables => _savables.ToList();
+
+            public void Register(ISavable savable)
+            {
+                RegisterCallCount++;
+                _savables.Add(savable);
+                OnSavableRegistered?.Invoke(savable);
+            }
+
+            public void Unregister(ISavable savable)
+            {
+                UnregisterCallCount++;
+                _savables.Remove(savable);
+                OnSavableUnregistered?.Invoke(savable);
             }
         }
 

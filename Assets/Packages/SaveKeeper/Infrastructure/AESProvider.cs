@@ -40,7 +40,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
             if (masterKey.Length < RECOMMENDED_MIN_KEY_LENGTH)
             {
-                DebugLog.Warning($"AESProvider has a weak key ({masterKey.Length} chars). Use at least {RECOMMENDED_MIN_KEY_LENGTH} high-entropy characters (e.g., GUID).");
+                SKLogger.Warning($"AESProvider has a weak key ({masterKey.Length} chars). Use at least {RECOMMENDED_MIN_KEY_LENGTH} high-entropy characters (e.g., GUID).");
             }
 
             _material = DeriveKeyMaterial(masterKey);

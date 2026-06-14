@@ -16,15 +16,9 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         /// </summary>
         public SafeTypeBinder Binder { get; }
 
-        /// <summary>
-        /// Creates a serializer with a fresh <see cref="SafeTypeBinder"/> that auto-discovers
-        /// all <see cref="ISaveData"/> / <see cref="ISaveMeta"/> types in currently-loaded assemblies.
-        /// </summary>
-        public JsonSerializer() : this(new SafeTypeBinder()) { }
-
-        public JsonSerializer(SafeTypeBinder binder)
+        public JsonSerializer()
         {
-            Binder = binder ?? throw new ArgumentNullException(nameof(binder));
+            Binder = new SafeTypeBinder();
 
             _settings = new JsonSerializerSettings
             {

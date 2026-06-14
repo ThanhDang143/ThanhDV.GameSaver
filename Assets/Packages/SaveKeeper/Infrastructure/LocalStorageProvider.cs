@@ -67,7 +67,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error writing data to file '{DebugLog.SanitizePath(fullPath)}': {DebugLog.SanitizeException(e)}");
+                SKLogger.Error($"Error writing data to file '{SKLogger.SanitizePath(fullPath)}': {SKLogger.SanitizeException(e)}");
                 throw;
             }
             finally
@@ -94,7 +94,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error writing data to file '{DebugLog.SanitizePath(fullPath)}': {DebugLog.SanitizeException(e)}");
+                SKLogger.Error($"Error writing data to file '{SKLogger.SanitizePath(fullPath)}': {SKLogger.SanitizeException(e)}");
                 throw;
             }
             finally
@@ -141,11 +141,11 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             try
             {
                 File.Copy(backupPath, fullPath, true);
-                DebugLog.Success($"Successfully restored file '{fileName}' from backup.");
+                SKLogger.Success($"Successfully restored file '{fileName}' from backup.");
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error restoring backup for '{fileName}': {e.Message}");
+                SKLogger.Error($"Error restoring backup for '{fileName}': {e.Message}");
                 throw;
             }
         }
@@ -215,11 +215,11 @@ namespace ThanhDV.SaveKeeper.Infrastructure
                 try
                 {
                     Directory.Delete(profilePath, true);
-                    DebugLog.Success($"Successfully deleted profile: {profileId}");
+                    SKLogger.Success($"Successfully deleted profile: {profileId}");
                 }
                 catch (Exception e)
                 {
-                    DebugLog.Error($"Failed to delete profile: {profileId}. Reason: {e.Message}");
+                    SKLogger.Error($"Failed to delete profile: {profileId}. Reason: {e.Message}");
                     throw;
                 }
             }
@@ -263,7 +263,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
             catch (Exception e)
             {
-                DebugLog.Error($"Error finding the most recent profile: {e.Message}");
+                SKLogger.Error($"Error finding the most recent profile: {e.Message}");
                 throw;
             }
         }

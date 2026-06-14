@@ -9,6 +9,8 @@ namespace ThanhDV.SaveKeeper.Core
         event Action<string> OnSaveCompleted;
         bool IsSimpleDataDirty { get; }
 
+        string CurrentProfileId { get; }
+
         // Profile / metadata
         SaveKeeperOperationHandle<List<T>> GetAllMetadataAsync<T>() where T : class, ISaveMeta;
         string GetMostRecentProfileId();
