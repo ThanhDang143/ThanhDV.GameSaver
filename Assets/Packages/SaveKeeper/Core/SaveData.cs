@@ -3,35 +3,29 @@ using System.Collections.Generic;
 namespace ThanhDV.SaveKeeper.Core
 {
     /// <summary>
-    /// Root save-file data, including savable objects, SimpleData entries, and metadata.
-    /// Metadata in this file is used if an error occurs while saving the separate .meta file.
+    /// Root save-file payload: savable objects, SimpleData entries, and metadata.
+    /// The embedded metadata is the fallback source when the .meta sidecar is missing or corrupted.
     /// </summary>
     [System.Serializable]
     public class SaveData
     {
-        /// <summary>
-        /// Metadata for this save, including profile ID, last-saved time, and custom fields.
-        /// </summary>
+        /// <summary>Metadata for this save (profile ID, last-saved time, custom fields).</summary>
         public ISaveMeta Meta { get; set; }
 
         /// <summary>
-        /// Dictionary storing the object data. Each implementation of ISaveData is considered a module.
-        /// Must be public for Newtonsoft.Json serialization to work properly.
+        /// Object snapshots keyed by <see cref="ISavable.SaveKey"/>. Public for Newtonsoft.Json serialization.
         /// </summary>
         public Dictionary<string, ISaveData> ObjectData { get; set; } = new();
 
         /// <summary>
-        /// Dictionary storing individual values for direct in-memory read and write operations.
-        /// Use this for standalone values that do not warrant a dedicated ISaveData module.
+        /// Free-form key/value store for standalone values that don't warrant a dedicated <see cref="ISaveData"/> module.
         /// </summary>
         public Dictionary<string, string> SimpleData { get; set; } = new();
 
         /// <summary>
-        /// Creates a shallow copy of this SaveData. 
-        /// The two dictionaries are new instances, but ISaveData entries and string values are shared by reference. 
-        /// Used internally for thread-safe snapshotting during save.
+        /// Returns a shallow clone: dictionaries are new, but entries and string values are shared by reference.
+        /// Used for thread-safe snapshotting during save.
         /// </summary>
-        /// <returns>A shallow clone of SaveData.</returns>
         public SaveData Clone()
         {
             SaveData clone = new()

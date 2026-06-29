@@ -18,37 +18,30 @@ namespace ThanhDV.SaveKeeper.Core
 
         private SaveData _curSaveData = new();
 
-        /// <summary>
-        /// Highest observed UTC time, used to detect backward clock changes.
-        /// </summary>
+        /// <summary>Highest observed UTC time — used to detect backward clock jumps.</summary>
         private DateTime _lastObservedTime = DateTime.MinValue;
 
-        /// <summary>
-        /// Minimum backward clock jump that triggers a skew warning.
-        /// </summary>
+        /// <summary>Minimum backward clock jump (seconds) that triggers a skew warning.</summary>
         private const double CLOCK_SKEW_THRESHOLD_SECONDS = 1.0;
 
         /// <summary>
-        /// True when unsaved changes exist via SetSimple/DeleteSimple since the last save or load.
-        /// Check before profile switches to warn "Save before loading?".
-        /// LoadAsync throws when dirty to prevent data loss — use <c>discardUnsavedChanges: true</c> to skip.
+        /// True when SetSimple/DeleteSimple changed in-memory state since the last save/load.
+        /// LoadAsync rejects when dirty to prevent data loss — pass <c>discardUnsavedChanges: true</c> to override.
         /// </summary>
         private bool _isSimpleDataDirty; public bool IsSimpleDataDirty => _isSimpleDataDirty;
 
-        /// <summary>
-        /// The profile currently active for implicit saves, or null when none is active. Read under _stateLock.
-        /// </summary>
+        /// <summary>Profile active for implicit saves, or null when none. Read under <see cref="_stateLock"/>.</summary>
         private string _curProfileId; public string CurrentProfileId { get { lock (_stateLock) return _curProfileId; } }
 
         /// <summary>
-        /// Caller's SynchronizationContext captured at construction. Used to marshal OnSaveCompleted
-        /// invocations and the auto-save countdown reset back to the original thread (typically Unity main thread).
+        /// SynchronizationContext captured at construction — marshals <see cref="OnSaveCompleted"/> back to
+        /// the original thread (typically Unity main thread) so callback code can safely touch Unity APIs.
         /// </summary>
         private readonly SynchronizationContext _capturedContext;
 
         /// <summary>
-        /// Raised after every successful save (async or immediate) with the profile ID that was saved.
-        /// Always fires on the thread where this SaveKeeper was constructed — safe for Unity API calls.
+        /// Raised after every successful save (async or immediate) with the saved profile ID.
+        /// Always fires on the thread where this SaveKeeper was constructed.
         /// </summary>
         public event Action<string> OnSaveCompleted;
 
@@ -56,21 +49,20 @@ namespace ThanhDV.SaveKeeper.Core
         private string SaveName => _settings.FileName + _settings.SaveExtension;
 
         /// <summary>
-        /// Per-profile pipeline state for concurrency control. Each entry represents a profile that currently has
-        /// a save or load pipeline running and/or coalesced trailing save requests waiting. Access must be guarded by _stateLock.
+        /// Per-profile pipeline state for concurrency control. One entry per profile with an in-flight
+        /// save/load or coalesced trailing requests. Access guarded by <see cref="_stateLock"/>.
         /// </summary>
         private readonly Dictionary<string, ProfilePipelineState> _profileStates = new();
 
         /// <summary>
-        /// Lock guarding _profileStates, _curSaveData (both inner dictionaries), and _curProfileId.
-        /// Held only for short, await-free critical sections to avoid serializing IO.
+        /// Guards <see cref="_profileStates"/>, <see cref="_curSaveData"/> (both inner dictionaries), and
+        /// <see cref="_curProfileId"/>. Held only for short, await-free critical sections.
         /// </summary>
         private readonly object _stateLock = new();
 
         /// <summary>
-        /// Initializes a new instance of the SaveKeeper class.
-        /// It manages serialization, storage, and persistence operations. Subscribing to registry changes enables 
-        /// automatic restoration of newly registered objects and captures state for the ones being unregistered.
+        /// Constructs a SaveKeeper. Subscribes to registry events so newly registered savables auto-restore
+        /// from the current state and unregistering ones get their state captured.
         /// </summary>
         public SaveKeeper(ISaveRegistry registry, IStorageProvider storageProvider, ISerializer serializer, IEncryptionProvider encryptionProvider, SaveSettings settings)
         {
@@ -88,11 +80,10 @@ namespace ThanhDV.SaveKeeper.Core
         #region Profile Management
 
         /// <summary>
-        /// Asynchronously fetches the metadata for all existing profiles.
-        /// This is particularly useful for constructing save-slot selection menus.
+        /// Asynchronously fetches metadata for all existing profiles, sorted most-recent first.
+        /// Useful for building save-slot selection menus.
         /// </summary>
-        /// <typeparam name="T">The type of metadata model, implementing <see cref="ISaveMeta"/>.</typeparam>
-        /// <returns>A tracking handle providing a list of all successfully parsed metadata files.</returns>
+        /// <typeparam name="T">Concrete metadata type implementing <see cref="ISaveMeta"/>.</typeparam>
         public SaveKeeperOperationHandle<List<T>> GetAllMetadataAsync<T>() where T : class, ISaveMeta
         {
             SaveKeeperOperationInternal<List<T>> internalOp = new();
@@ -102,33 +93,54 @@ namespace ThanhDV.SaveKeeper.Core
             return new SaveKeeperOperationHandle<List<T>>(internalOp);
         }
 
-        /// <summary>
-        /// Retrieves the ID of the most recently modified profile.
-        /// </summary>
-        /// <returns>The most recent profile ID, or null if no profiles exist.</returns>
+        /// <summary>Returns the most recently saved profile ID, or null if no profiles exist.</summary>
         public string GetMostRecentProfileId()
         {
             return _storageProvider.GetMostRecentProfileId(SaveName);
         }
 
-        /// <summary>
-        /// Retrieves a collection of all available profile IDs.
-        /// </summary>
-        /// <returns>An enumerable collection of profile ID strings.</returns>
+        /// <summary>Returns every profile ID that currently has saved data on disk.</summary>
         public IEnumerable<string> GetAllProfiles()
         {
             return _storageProvider.GetAllProfileIds();
         }
 
+        /// <summary>Returns true if a save file exists on disk for the given profile (false for null/empty).</summary>
+        public bool ProfileExists(string profileId)
+        {
+            return !string.IsNullOrEmpty(profileId) && _storageProvider.Exists(profileId, SaveName);
+        }
+
         /// <summary>
-        /// Deletes the specified profile and its associated save data from storage.
-        /// If the deleted profile is the currently active one, the current profile state is completely cleared.
+        /// Creates and activates a new save profile with an initial save; in-memory state from a prior load/save is cleared first.
         /// </summary>
-        /// <param name="profileId">The ID of the profile to delete.</param>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when a save or load operation is currently in flight for the same profile.
-        /// Wait for the operation to complete (or for trailing saves to drain) before deleting.
-        /// </exception>
+        public void CreateProfile(string profileId, ISaveMeta metadata = null, bool overwrite = false)
+        {
+            if (string.IsNullOrEmpty(profileId)) throw new ArgumentNullException(nameof(profileId));
+
+            if (_storageProvider.Exists(profileId, SaveName))
+            {
+                if (!overwrite)
+                {
+                    throw new InvalidOperationException($"Profile '{profileId}' already exists. Pass overwrite: true to replace it.");
+                }
+                DeleteProfile(profileId);   // also throws if pipeline busy for this profile
+            }
+
+            lock (_stateLock)
+            {
+                _curSaveData = new();
+                _curProfileId = profileId;
+                ClearSimpleDataDirtyFlag();
+            }
+
+            SaveImmediate(profileId, metadata);
+        }
+
+        /// <summary>
+        /// Deletes a profile and all its save data. If the profile is currently active, in-memory state is cleared too.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">A save or load is in flight for this profile — wait for it to drain.</exception>
         public void DeleteProfile(string profileId)
         {
             if (string.IsNullOrEmpty(profileId)) return;
@@ -161,11 +173,10 @@ namespace ThanhDV.SaveKeeper.Core
         #region Save/Load
 
         /// <summary>
-        /// Asynchronously saves the current game state to the specified profile.
+        /// Asynchronously saves the current state. Coalesces with any in-flight save for the same profile.
         /// </summary>
-        /// <param name="profileId">The target profile ID. If null, the currently active profile is used.</param>
-        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        /// <returns>A handle to track the progress and completion of the save operation.</returns>
+        /// <param name="profileId">Target profile; null uses <see cref="CurrentProfileId"/>.</param>
+        /// <param name="metadata">UI display metadata; null uses <see cref="DefaultSaveMeta"/>.</param>
         public SaveKeeperOperationHandle SaveAsync(string profileId = null, ISaveMeta metadata = null)
         {
             SaveKeeperOperationInternal internalOp = new();
@@ -242,14 +253,11 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Synchronously captures and saves the current game state to the specified profile.
-        /// This is a blocking operation and should be used with caution to avoid frame drops.
+        /// Synchronously captures and saves. Blocks the calling thread — use sparingly to avoid frame drops.
         /// </summary>
-        /// <param name="profileId">The target profile ID. If null, the currently active profile is used.</param>
-        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when no valid profile ID can be determined, or when another save operation is already in flight for the target profile.
-        /// </exception>
+        /// <param name="profileId">Target profile; null uses <see cref="CurrentProfileId"/>.</param>
+        /// <param name="metadata">UI display metadata; null uses <see cref="DefaultSaveMeta"/>.</param>
+        /// <exception cref="InvalidOperationException">No valid profile ID, or another save is in flight for this profile.</exception>
         public void SaveImmediate(string profileId = null, ISaveMeta metadata = null)
         {
             bool isImplicit = profileId == null;
@@ -329,11 +337,8 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Restores the backup save file for the specified profile, replacing any broken primary save data with a healthy backup.
-        /// </summary>
-        /// <param name="profileId">The ID of the profile to restore from its corresponding backup.</param>
-        /// <exception cref="ArgumentNullException">Thrown when the provided profileId is null or empty.</exception>
+        /// <summary>Restores a profile's backup file, replacing a broken primary save.</summary>
+        /// <exception cref="ArgumentNullException">profileId is null or empty.</exception>
         public void RestoreBackup(string profileId)
         {
             if (string.IsNullOrEmpty(profileId)) throw new ArgumentNullException(nameof(profileId), "ProfileId cannot be null or empty.");
@@ -342,13 +347,11 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Loads game data from the specified profile and restores it to registered ISavable instances.
+        /// Loads a profile and restores state into every registered <see cref="ISavable"/>.
         /// </summary>
-        /// <param name="profileId">The ID of the profile to load.</param>
         /// <param name="discardUnsavedChanges">
-        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
-        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
-        /// changes and continue loading.
+        /// Default false. Operation fails if <see cref="IsSimpleDataDirty"/> is true (prevents data loss);
+        /// pass true to discard pending changes and load anyway.
         /// </param>
         public SaveKeeperOperationHandle LoadAsync(string profileId, bool discardUnsavedChanges = false)
         {
@@ -363,15 +366,8 @@ namespace ThanhDV.SaveKeeper.Core
             return new SaveKeeperOperationHandle(internalOp);
         }
 
-        /// <summary>
-        /// Loads data from the backup file instead of the main file. Use this when the main save is corrupted.
-        /// </summary>
-        /// <param name="profileId">The ID of the profile whose backup should be loaded.</param>
-        /// <param name="discardUnsavedChanges">
-        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
-        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
-        /// changes and continue loading.
-        /// </param>
+        /// <summary>Loads from the backup file instead of the main file — use when the primary save is corrupted.</summary>
+        /// <param name="discardUnsavedChanges">See <see cref="LoadAsync"/>.</param>
         public SaveKeeperOperationHandle LoadBackupAsync(string profileId, bool discardUnsavedChanges = false)
         {
             SaveKeeperOperationInternal internalOp = new();
@@ -385,14 +381,8 @@ namespace ThanhDV.SaveKeeper.Core
             return new SaveKeeperOperationHandle(internalOp);
         }
 
-        /// <summary>
-        /// Attempts to lazily resolve the most recently saved profile and loads it asynchronously. 
-        /// </summary>
-        /// <param name="discardUnsavedChanges">
-        /// Defaults to false. If <see cref="IsSimpleDataDirty"/> is true, the operation completes with
-        /// <see cref="InvalidOperationException"/> to prevent data loss. Pass true to discard unsaved
-        /// changes and continue loading.
-        /// </param>
+        /// <summary>Resolves the most recently saved profile and loads it. Fails if none exists.</summary>
+        /// <param name="discardUnsavedChanges">See <see cref="LoadAsync"/>.</param>
         public SaveKeeperOperationHandle LoadMostRecentAsync(bool discardUnsavedChanges = false)
         {
             SaveKeeperOperationInternal internalOp = new();
@@ -428,13 +418,9 @@ namespace ThanhDV.SaveKeeper.Core
         #region Process Save/Load
 
         /// <summary>
-        /// Orchestrates the save workflow for a single profile, including the trailing loop that drains
-        /// coalesced SaveAsync calls that arrived while the leading pipeline was running.
+        /// Runs the leading save pass plus a trailing loop that drains coalesced SaveAsync calls that
+        /// arrived while the leading pipeline was running.
         /// </summary>
-        /// <param name="targetProfile">The resolved profile ID to save to. Must be non-empty.</param>
-        /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
-        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
-        /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         private async Task ProcessSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, Dictionary<string, ISaveData> captured, SaveKeeperOperationInternal internalOp)
         {
             await ProcessSingleSaveAsync(targetProfile, isImplicit, metadata, captured, internalOp).ConfigureAwait(false);
@@ -488,13 +474,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Executes a single save pipeline pass:
-        /// capturing dynamic state, serializing, optionally encrypting, and persistently writing out.
+        /// One save pipeline pass: merge captured state, serialize, optionally encrypt, then persist to disk.
         /// </summary>
-        /// <param name="targetProfile">The target profile ID, which defaults to current if omitted.</param>
-        /// <param name="isImplicit">True if the original SaveAsync call passed null (use current profile). Controls _curProfileId update.</param>
-        /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
-        /// <param name="metadata">UI display metadata (implements ISaveMeta).</param>
         private async Task ProcessSingleSaveAsync(string targetProfile, bool isImplicit, ISaveMeta metadata, Dictionary<string, ISaveData> captured, SaveKeeperOperationInternal internalOp)
         {
             try
@@ -543,13 +524,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Orchestrates the asynchronous, multi-step workflow required for loading: 
-        /// rejecting the request if a save is in flight for the same profile, reading from primary or backup storage,
-        /// decrypting and parsing on a background thread, and progressively restoring registered objects.
+        /// Load pipeline: claim the load slot, read+decrypt+deserialize off-thread, then progressively restore
+        /// each registered savable. Rejects if a save/load is already in flight for this profile.
         /// </summary>
-        /// <param name="profileId">The ID to strictly load from.</param>
-        /// <param name="isBackup">Indicator denoting whether the raw storage layer reads from standard file or backup.</param>
-        /// <param name="internalOp">Operation context to report completion and progress scaling.</param>
         private async Task ProcessLoadAsync(string profileId, bool isBackup, SaveKeeperOperationInternal internalOp)
         {
             bool claimedLoad = false;
@@ -676,11 +653,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Asynchronously loads metadata for every available profile, sorted by most recent save time.
-        /// Uses the meta sidecar cache for fast reads; falls back to rebuilding metadata from the save source of truth when the sidecar is missing, stale (post-crash), or corrupted.
+        /// Loads metadata for every profile, sorted most-recent first. Uses the .meta sidecar for fast reads;
+        /// falls back to rebuilding from the .sav source of truth when the sidecar is missing/stale/corrupted.
         /// </summary>
-        /// <typeparam name="T">The concrete metadata type, which must implement <see cref="ISaveMeta"/>.</typeparam>
-        /// <param name="internalOp">Operation context to report status, completion, and progress scaling.</param>
         private async Task ProcessLoadAllMetadataAsync<T>(SaveKeeperOperationInternal<List<T>> internalOp) where T : class, ISaveMeta
         {
             try
@@ -728,9 +703,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Awaits all pending async save pipelines, looping to catch new SaveAsync calls.
-        /// Use before scene transitions or before SaveImmediate.
-        /// Does not interact with sync saves or rethrow errors (routed to individual handles).
+        /// Awaits every in-flight async save (looping to catch new SaveAsync calls). Use before scene
+        /// transitions or before SaveImmediate. Errors are routed to individual handles, not rethrown.
         /// </summary>
         public async Task WaitForPendingOperationsAsync()
         {
@@ -761,13 +735,9 @@ namespace ThanhDV.SaveKeeper.Core
         #region Direct Access
 
         /// <summary>
-        /// Directly stores a primitive variable (int, float, string, etc.) or a small struct in memory.
-        /// A convenience API similar to Easy Save.
-        /// Note: You still need to call SaveAsync() or SaveImmediate() to persist the data to disk.
+        /// Stores a primitive or small struct in memory (Easy-Save-style). Call <see cref="SaveAsync"/>
+        /// or <see cref="SaveImmediate"/> afterwards to persist.
         /// </summary>
-        /// <typeparam name="T">The type of the value being stored.</typeparam>
-        /// <param name="key">The unique identifier for the value.</param>
-        /// <param name="value">The value to store.</param>
         public void SetSimple<T>(string key, T value)
         {
             if (string.IsNullOrEmpty(key))
@@ -787,12 +757,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Retrieves a value directly from memory by its key. Returns the provided defaultValue if it was never saved.
+        /// Reads a value by key. Returns <paramref name="defaultValue"/> if the key is missing or parsing fails.
         /// </summary>
-        /// <typeparam name="T">The expected type of the value.</typeparam>
-        /// <param name="key">The unique identifier for the value.</param>
-        /// <param name="defaultValue">The fallback value to return if the key doesn't exist or parsing fails. Defaults to default(T).</param>
-        /// <returns>The deserialized value of type T, or the defaultValue if not found.</returns>
         public T GetSimple<T>(string key, T defaultValue = default)
         {
             if (string.IsNullOrEmpty(key))
@@ -821,11 +787,7 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Checks if a specific key has been saved in memory.
-        /// </summary>
-        /// <param name="key">The unique identifier to check.</param>
-        /// <returns>True if the key exists, otherwise false.</returns>
+        /// <summary>True if the given key currently has a value in the SimpleData store.</summary>
         public bool HasSimpleKey(string key)
         {
             if (string.IsNullOrEmpty(key))
@@ -837,10 +799,7 @@ namespace ThanhDV.SaveKeeper.Core
             lock (_stateLock) return _curSaveData.SimpleData.ContainsKey(key);
         }
 
-        /// <summary>
-        /// Deletes a specific key and its associated value from memory.
-        /// </summary>
-        /// <param name="key">The unique identifier of the data to remove.</param>
+        /// <summary>Removes a key (and its value) from the SimpleData store.</summary>
         public void DeleteSimple(string key)
         {
             if (string.IsNullOrEmpty(key))
@@ -861,10 +820,9 @@ namespace ThanhDV.SaveKeeper.Core
         #region The Safety Net
 
         /// <summary>
-        /// Handled whenever a new ISavable registers itself. 
-        /// Automatically forces a restoration into its context based on the current parsed save data.
+        /// Fires when a savable registers. Auto-restores its state from <see cref="_curSaveData"/> if a
+        /// matching key exists — so late-arriving objects pick up the loaded profile.
         /// </summary>
-        /// <param name="savable">The newly observed object.</param>
         private void OnSavableRegistered(ISavable savable)
         {
             ISaveData saveData;
@@ -875,10 +833,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Handled roughly before an ISavable unregisters itself (e.g. gets destroyed).
-        /// Automatically forces a capture of its context back into the global save data cache beforehand so state isn't lost.
+        /// Fires when a savable is about to unregister (typically OnDestroy). Captures its state into
+        /// <see cref="_curSaveData"/> so it survives the next save.
         /// </summary>
-        /// <param name="savable">The object preparing to detach.</param>
         private void OnSavableUnregistered(ISavable savable)
         {
             ISaveData saveData = savable.CaptureData();
@@ -887,9 +844,7 @@ namespace ThanhDV.SaveKeeper.Core
             lock (_stateLock) _curSaveData.ObjectData[savable.SaveKey] = saveData;
         }
 
-        /// <summary>
-        /// Tears down references to the registry. Highly recommended to explicitly call this to prevent lingering objects.
-        /// </summary>
+        /// <summary>Unsubscribes from registry events. Call to prevent lingering references after teardown.</summary>
         public void Dispose()
         {
             _registry.OnSavableRegistered -= OnSavableRegistered;
@@ -901,12 +856,9 @@ namespace ThanhDV.SaveKeeper.Core
         #region Helper
 
         /// <summary>
-        /// Restores a savable from the provided save-data snapshot.
-        /// Skips invocation entirely when no entry exists for the savable's key — the object keeps its
-        /// default state, freeing user code from having to null-check inside RestoreData.
+        /// Restores a savable from a snapshot. Skips invocation if no entry exists for the savable's key —
+        /// the object keeps its default state, so user RestoreData code doesn't need null checks.
         /// </summary>
-        /// <param name="savable">The savable instance to restore.</param>
-        /// <param name="sourceSaveData">The save-data snapshot used for lookup.</param>
         private void RestoreSavable(ISavable savable, SaveData sourceSaveData)
         {
             if (!sourceSaveData.ObjectData.TryGetValue(savable.SaveKey, out ISaveData saveData)) return;
@@ -914,9 +866,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Calls CaptureData() on every registered savable and collects non-null results into a new dictionary.
-        /// Runs WITHOUT holding _stateLock — call this off-lock (it executes user CaptureData() code). 
-        /// Callers merge the returned dictionary into _curSaveData.ObjectData under _stateLock.
+        /// Calls <see cref="ISavable.CaptureData"/> on every registered savable and collects non-null results.
+        /// Runs OFF-lock because it executes user code; callers merge the result under <see cref="_stateLock"/>.
         /// </summary>
         private Dictionary<string, ISaveData> CaptureAllSavables()
         {
@@ -935,11 +886,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Invoked at the end of a successful save. Resets the auto-save countdown when the saved profile
-        /// matches the current implicit profile, then notifies external subscribers via <see cref="OnSaveCompleted"/>.
-        /// Both actions are marshaled to the captured SynchronizationContext.
+        /// Fires <see cref="OnSaveCompleted"/> after a successful save, marshalled to the captured
+        /// <see cref="_capturedContext"/> so subscribers run on the original (Unity main) thread.
         /// </summary>
-        /// <param name="profileId">The profile that was just persisted to disk.</param>
         private void NotifySaveCompleted(string profileId)
         {
             Action<string> handler = OnSaveCompleted;
@@ -956,25 +905,21 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Marks unsaved changes. Called by SetSimple/DeleteSimple after mutating _curSaveData.SimpleData.
-        /// </summary>
+        /// <summary>Marks unsaved changes (called after SimpleData mutations).</summary>
         private void MarkSimpleDataDirtyFlag()
         {
             lock (_stateLock) _isSimpleDataDirty = true;
         }
 
-        /// <summary>
-        /// Clears the dirty flag. Called after a successful save or load.
-        /// </summary>
+        /// <summary>Clears the dirty flag (after a successful save or load).</summary>
         private void ClearSimpleDataDirtyFlag()
         {
             lock (_stateLock) _isSimpleDataDirty = false;
         }
 
         /// <summary>
-        /// Returns true if load can proceed. Returns false and completes the handle with an error
-        /// if unsaved changes exist and discardUnsavedChanges is false.
+        /// Returns true if a load may proceed; otherwise completes the handle with an error
+        /// when <see cref="IsSimpleDataDirty"/> and <paramref name="discardUnsavedChanges"/> is false.
         /// </summary>
         private bool TryAuthorizeLoad(string profileId, bool discardUnsavedChanges, SaveKeeperOperationInternal intenalOp)
         {
@@ -990,8 +935,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Reads save (or its backup), decrypts, deserializes, and extracts the embedded <see cref="ISaveMeta"/>. 
-        /// Returns null when the file is missing, corrupted, or its meta is not castable to <typeparamref name="T"/>.
+        /// Reads the save (or backup), decrypts/deserializes, and returns the embedded <see cref="ISaveMeta"/>.
+        /// Returns null when the file is missing, corrupted, or the meta isn't castable to <typeparamref name="T"/>.
         /// </summary>
         private async Task<T> TryRebuildMetaAsync<T>(string profile, bool useBackup) where T : class, ISaveMeta
         {
@@ -1016,7 +961,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Resolves metadata for a single profile. Tries read meta when the sidecar is fresh per mtime; otherwise rebuilds from save and self-heals the sidecar.
+        /// Resolves metadata for one profile. Fast-path: read the .meta sidecar if its mtime is fresh.
+        /// Slow-path: rebuild from .sav (then .sav.bak), then self-heal the sidecar.
         /// </summary>
         private async Task<T> TryLoadMetaAsync<T>(string profile) where T : class, ISaveMeta
         {
@@ -1067,11 +1013,8 @@ namespace ThanhDV.SaveKeeper.Core
             return metadata;
         }
 
-        /// <summary>
-        /// Returns the current UTC time and warns if the clock moved backward too far.
-        /// </summary>
+        /// <summary>Returns current UTC time and warns if the clock jumped backward beyond the threshold.</summary>
         /// <param name="context">Label included in the warning for debugging.</param>
-        /// <returns>The current UTC time.</returns>
         private DateTime ReadClockAndCheckSkew(string context)
         {
             DateTime now = DateTime.UtcNow;
@@ -1104,9 +1047,7 @@ namespace ThanhDV.SaveKeeper.Core
             return now;
         }
 
-        /// <summary>
-        /// Observes a timestamp from an external source (loaded save metadata) to update the clock baseline.
-        /// </summary>
+        /// <summary>Bumps the clock baseline from an external timestamp (e.g. loaded save metadata).</summary>
         private void ObserveExternalTimestamp(DateTime time)
         {
             if (time == default) return;
@@ -1118,48 +1059,37 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Tracks per-profile pipeline state for concurrency control. Each profile with an in-flight save or load
-        /// (or pending coalesced save requests) has one instance of this class. Access must be guarded by SaveKeeper._stateLock.
+        /// Per-profile concurrency-control state. One instance per profile with an in-flight save/load or
+        /// coalesced trailing requests. Access guarded by <see cref="SaveKeeper._stateLock"/>.
         /// </summary>
         private class ProfilePipelineState
         {
             /// <summary>
-            /// The operation currently in flight for this profile. None = idle.
-            /// SaveAsync coalesces only when this is AsyncSave; ImmediateSave/Load reject incoming saves.
+            /// Current in-flight kind. None = idle. SaveAsync coalesces only when AsyncSave;
+            /// ImmediateSave/Load reject incoming saves.
             /// </summary>
             public PipelineActivity Activity;
 
-            /// <summary>
-            /// Task from the ProcessSaveAsync pipeline. Set only when Activity == AsyncSave; used to await in-flight saves.
-            /// </summary>
+            /// <summary>Task from the ProcessSaveAsync pipeline (set only when Activity == AsyncSave).</summary>
             public Task RunningTask;
 
-            /// <summary>
-            /// True if at least one additional SaveAsync arrived while an async save was running.
-            /// The trailing save runs after the current pipeline completes.
-            /// </summary>
+            /// <summary>True if a SaveAsync arrived while another was running — trailing save will drain it.</summary>
             public bool IsDirty;
 
-            /// <summary>
-            /// Last-wins metadata supplied by coalesced SaveAsync calls. Applied by the trailing save.
-            /// </summary>
+            /// <summary>Last-wins metadata from coalesced calls, applied by the trailing save.</summary>
             public ISaveMeta PendingMetadata;
 
             /// <summary>
-            /// Last-wins captured object state from coalesced SaveAsync calls (captured at call time, off-lock,
-            /// on the main thread). The trailing save merges this instead of re-capturing.
+            /// Last-wins captured object state from coalesced calls (captured off-lock on the main thread).
+            /// Trailing save merges this instead of re-capturing.
             /// </summary>
             public Dictionary<string, ISaveData> PendingCaptured;
 
-            /// <summary>
-            /// Handles of coalesced SaveAsync calls. All complete together when the trailing save finishes.
-            /// </summary>
+            /// <summary>Handles of coalesced SaveAsync calls; all complete together when the trailing save finishes.</summary>
             public readonly List<SaveKeeperOperationInternal> PendingHandles = new();
         }
 
-        /// <summary>
-        /// The single in-flight operation kind for a profile. Save and Load are mutually exclusive per profile.
-        /// </summary>
+        /// <summary>The in-flight operation kind for a profile. Save and Load are mutually exclusive per profile.</summary>
         private enum PipelineActivity
         {
             None,

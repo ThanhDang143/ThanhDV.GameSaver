@@ -27,12 +27,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         #region Write
 
-        /// <summary>
-        /// Asynchronously writes data to a file for a specific profile.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The name of the file.</param>
-        /// <param name="data">The data to write to the file.</param>
+        /// <summary>Asynchronously writes data atomically to the profile's file (temp → swap → backup).</summary>
         public async Task WriteAsync(string profileId, string fileName, string data)
         {
             ValidateProfileId(profileId);
@@ -49,11 +44,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             WriteToFileImmediate(fullPath, data);
         }
 
-        /// <summary>
-        /// Asynchronously writes data to a file using a secure temporary-to-main replacement flow.
-        /// </summary>
-        /// <param name="fullPath">The complete file path describing where to write the data.</param>
-        /// <param name="data">The string content to write.</param>
+        /// <summary>Atomic async write: writes to a temp file, then swaps it into place (old → .bak).</summary>
         private async Task WriteToFileAsync(string fullPath, string data)
         {
             PrepareDirectory(fullPath);
@@ -76,11 +67,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Synchronously writes data to a file using a secure temporary-to-main replacement flow.
-        /// </summary>
-        /// <param name="fullPath">The complete file path describing where to write the data.</param>
-        /// <param name="data">The string content to write.</param>
+        /// <summary>Atomic sync write: writes to a temp file, then swaps it into place (old → .bak).</summary>
         private void WriteToFileImmediate(string fullPath, string data)
         {
             PrepareDirectory(fullPath);
@@ -104,11 +91,9 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// If the main save file exists, replace it with the temp file (aka lastest file) and keep the previous version as a backup.
+        /// Replaces the original file with the temp file, demoting the previous version to backup.
+        /// Falls back to a plain move if the original doesn't exist yet.
         /// </summary>
-        /// <param name="originalPath">The primary save file.</param>
-        /// <param name="tempPath">The temp file (aka lastest file).</param>
-        /// <param name="backupPath">The backup file.</param>
         private void SafeReplace(string originalPath, string tempPath, string backupPath)
         {
             if (File.Exists(originalPath))
@@ -121,11 +106,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Restores the save data from its backup file by overwriting the primary save file.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The target save file name to restore.</param>
+        /// <summary>Restores from backup by copying .bak over the primary file.</summary>
+        /// <exception cref="FileNotFoundException">No backup file exists for this profile/file.</exception>
         public void RestoreBackup(string profileId, string fileName)
         {
             ValidateProfileId(profileId);
@@ -154,12 +136,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         #region Read
 
-        /// <summary>
-        /// Asynchronously reads the content of the primary save file.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The target save file name to read.</param>
-        /// <returns>A task that resolves to the file content string.</returns>
+        /// <summary>Asynchronously reads the primary save file.</summary>
+        /// <exception cref="FileNotFoundException">Primary save file does not exist.</exception>
         public async Task<string> ReadAsync(string profileId, string fileName)
         {
             ValidateProfileId(profileId);
@@ -175,12 +153,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return result;
         }
 
-        /// <summary>
-        /// Asynchronously reads the content of the backup save file.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The target save file name associated with the backup.</param>
-        /// <returns>A task that resolves to the backup file content string.</returns>
+        /// <summary>Asynchronously reads the backup save file (.bak).</summary>
+        /// <exception cref="FileNotFoundException">Backup file does not exist.</exception>
         public async Task<string> ReadBackupAsync(string profileId, string fileName)
         {
             ValidateProfileId(profileId);
@@ -201,10 +175,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         #region Profile Management
 
-        /// <summary>
-        /// Deletes an entire profile and all its associated save files.
-        /// </summary>
-        /// <param name="profileId">The target profile ID to delete.</param>
+        /// <summary>Deletes the profile's folder and every save file inside.</summary>
         public void DeleteProfile(string profileId)
         {
             ValidateProfileId(profileId);
@@ -225,10 +196,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Gets a list of all existing profile IDs by identifying the folders within the base path.
-        /// </summary>
-        /// <returns>An enumerable collection of profile IDs.</returns>
+        /// <summary>Returns every profile ID — one per top-level folder under the base path.</summary>
         public IEnumerable<string> GetAllProfileIds()
         {
             if (!Directory.Exists(_basePath)) return Enumerable.Empty<string>();
@@ -238,11 +206,9 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Identifies the profile whose primary save file was written most recently, falling back to the profile's backup (.bak) when the primary is missing. 
-        /// Other files (.meta sidecar, leftover .tmp) are ignored so a self-healed metadata write or a crashed temp file cannot make the wrong profile look most recent.
+        /// Returns the profile whose primary save (or backup, if primary missing) was written most recently.
+        /// Ignores .meta sidecars and .tmp leftovers so self-healed writes can't skew the ranking.
         /// </summary>
-        /// <param name="fileName">The primary save file name to rank profiles by.</param>
-        /// <returns>The newest profile ID, or null if no profile has a save or backup file.</returns>
         public string GetMostRecentProfileId(string fileName)
         {
             if (!Directory.Exists(_basePath)) return null;
@@ -268,12 +234,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Checks if a designated save file or its backup exists.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The target save file name to check.</param>
-        /// <returns>True if either the primary save or its backup exists, false otherwise.</returns>
+        /// <summary>True if the primary save or its backup exists for the profile.</summary>
         public bool Exists(string profileId, string fileName)
         {
             ValidateProfileId(profileId);
@@ -282,12 +243,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return File.Exists(fullPath) || File.Exists(fullPath + Constant.FILE_BACKUP_EXTENTION);
         }
 
-        /// <summary>
-        /// Returns the UTC modification time of the file specified by <paramref name="fileName"/>, or null if the file does not exist.
-        /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The target save file name to inspect.</param>
-        /// <returns>UTC <see cref="DateTime"/> of last content modification, or null when missing.</returns>
+        /// <summary>Returns the file's last-modified UTC time, or null if missing.</summary>
         public DateTime? GetLastWriteTimeUtc(string profileId, string fileName)
         {
             ValidateProfileId(profileId);
@@ -303,11 +259,9 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         #region Helper
 
         /// <summary>
-        /// Combines the base path, profile ID, and file name to get the full file path.
+        /// Resolves <paramref name="profileId"/>/<paramref name="fileName"/> under the base path.
+        /// Throws <see cref="ArgumentException"/> if the resolved path escapes the base directory (path-traversal guard).
         /// </summary>
-        /// <param name="profileId">The profile ID.</param>
-        /// <param name="fileName">The name of the file.</param>
-        /// <returns>The combined full path.</returns>
         private string GetFullPath(string profileId, string fileName)
         {
             string combined = Path.Combine(_basePath, profileId, fileName);
@@ -323,10 +277,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return resolved;
         }
 
-        /// <summary>
-        /// Ensures the directory for the specified file path exists by creating it if needed.
-        /// </summary>
-        /// <param name="fullPath">The full path of the file.</param>
+        /// <summary>Creates the parent directory of <paramref name="fullPath"/> if it does not yet exist.</summary>
         private void PrepareDirectory(string fullPath)
         {
             string dir = Path.GetDirectoryName(fullPath);
@@ -336,10 +287,10 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Validates that the profile ID is not null, empty, or whitespace, is not a reserved name,
-        /// and does not contain invalid characters or path separators.
+        /// Rejects null/empty/whitespace IDs, reserved names ('.'/'..'), and IDs containing path separators
+        /// or characters illegal in file names.
         /// </summary>
-        /// <exception cref="ArgumentException">Thrown when profileId violates any of these constraints.</exception>
+        /// <exception cref="ArgumentException">profileId violates any of the above.</exception>
         private void ValidateProfileId(string profileId)
         {
             if (string.IsNullOrWhiteSpace(profileId))
@@ -360,8 +311,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Returns the save file's last-write time (UTC) for a profile, falling back to the backup file's time when the primary save is missing. 
-        /// Returns null when neither exists (the profile has no loadable save).
+        /// Returns the save file's UTC last-write time, falling back to the backup when the primary is missing.
+        /// Returns null when neither exists.
         /// </summary>
         private DateTime? GetSaveMtime(DirectoryInfo profileDir, string fileName, string backupName)
         {

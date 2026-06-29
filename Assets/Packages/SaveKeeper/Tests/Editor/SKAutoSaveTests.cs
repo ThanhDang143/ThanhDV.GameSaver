@@ -289,6 +289,8 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             public SaveKeeperOperationHandle<List<T>> GetAllMetadataAsync<T>() where T : class, ISaveMeta => default;
             public string GetMostRecentProfileId() => null;
             public IEnumerable<string> GetAllProfiles() => Array.Empty<string>();
+            public bool ProfileExists(string profileId) => false;
+            public void CreateProfile(string profileId, ISaveMeta metadata = null, bool overwrite = false) { }
             public void DeleteProfile(string profileId) { }
             public SaveKeeperOperationHandle LoadAsync(string profileId, bool discardUnsavedChanges = false) => default;
             public SaveKeeperOperationHandle LoadBackupAsync(string profileId, bool discardUnsavedChanges = false) => default;

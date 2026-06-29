@@ -3,10 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace ThanhDV.SaveKeeper.Core
 {
-    /// <summary>
-    /// Custom awaiter pattern implementation that allows `SaveKeeperOperationHandle` to be awaited asynchronously.
-    /// Ties into the standard C# state machine via INotifyCompletion.
-    /// </summary>
+    /// <summary>Awaiter that lets <see cref="SaveKeeperOperationHandle"/> work with the C# <c>await</c> keyword.</summary>
     public struct SaveKeeperAwaiter : INotifyCompletion
     {
         private SaveKeeperOperationHandle m_Handle;
@@ -16,14 +13,10 @@ namespace ThanhDV.SaveKeeper.Core
             m_Handle = handle;
         }
 
-        /// <summary>
-        /// Checked by the runtime to see if it should pause execution.
-        /// </summary>
+        /// <summary>Checked by the runtime — true means skip the suspend.</summary>
         public readonly bool IsCompleted => m_Handle.IsDone;
 
-        /// <summary>
-        /// Schedules the continuation action that resumes the async method after completion.
-        /// </summary>
+        /// <summary>Schedules the continuation that resumes the async method when the operation finishes.</summary>
         public readonly void OnCompleted(Action continuation)
         {
             if (m_Handle.m_InternalOp != null)
@@ -38,9 +31,7 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Called when the await is finished. Throws the recorded exception if the operation failed.
-        /// </summary>
+        /// <summary>Called when the await resumes — rethrows the recorded exception if the operation failed.</summary>
         public readonly void GetResult()
         {
             if (m_Handle.Status == SaveKeeperOperationStatus.Failed)
@@ -50,10 +41,7 @@ namespace ThanhDV.SaveKeeper.Core
         }
     }
 
-    /// <summary>
-    /// Custom awaiter pattern implementation that allows `SaveKeeperOperationHandle&lt;T&gt;` to be awaited asynchronously.
-    /// Returns a generic result type upon completion.
-    /// </summary>
+    /// <summary>Awaiter for the generic <see cref="SaveKeeperOperationHandle{T}"/>; returns the typed result.</summary>
     /// <typeparam name="T">The type of the expected result.</typeparam>
     public struct SaveKeeperAwaiter<T> : INotifyCompletion
     {
@@ -78,9 +66,7 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Retrieves the result of the operation. Throws the recorded exception if the operation failed.
-        /// </summary>
+        /// <summary>Retrieves the operation's result — rethrows the recorded exception if the operation failed.</summary>
         public readonly T GetResult()
         {
             if (m_Handle.Status == SaveKeeperOperationStatus.Failed)

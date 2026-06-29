@@ -15,6 +15,8 @@ namespace ThanhDV.SaveKeeper.Core
         SaveKeeperOperationHandle<List<T>> GetAllMetadataAsync<T>() where T : class, ISaveMeta;
         string GetMostRecentProfileId();
         IEnumerable<string> GetAllProfiles();
+        bool ProfileExists(string profileId);
+        void CreateProfile(string profileId, ISaveMeta metadata = null, bool overwrite = false);
         void DeleteProfile(string profileId);
 
         // Save

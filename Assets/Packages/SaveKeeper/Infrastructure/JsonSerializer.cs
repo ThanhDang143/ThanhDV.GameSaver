@@ -11,8 +11,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         private readonly JsonSerializerSettings _settings;
 
         /// <summary>
-        /// Whitelist binder for manually registering types loaded after construction (AssetBundles, DLC, mods).
-        /// Register before serializing/deserializing those types.
+        /// Whitelist binder. Use <c>Binder.Register&lt;T&gt;("alias")</c> for types loaded after construction
+        /// (AssetBundles, DLC, mods) before serializing/deserializing them.
         /// </summary>
         public SafeTypeBinder Binder { get; }
 
@@ -31,24 +31,16 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             };
         }
 
-        /// <summary>
-        /// Serializes the specified object to a JSON string.
-        /// </summary>
-        /// <typeparam name="T">The type of the object to serialize.</typeparam>
-        /// <param name="obj">The object to serialize.</param>
-        /// <returns>A JSON string representing the serialized object.</returns>
+        /// <summary>Serializes <paramref name="obj"/> to a JSON string.</summary>
+        /// <exception cref="ArgumentNullException">obj is null.</exception>
         public string Serialize<T>(T obj)
         {
             if (obj == null) throw new ArgumentNullException(nameof(obj), "The object to serialize is null.");
             return JsonConvert.SerializeObject(obj, _settings);
         }
 
-        /// <summary>
-        /// Deserializes the specified JSON string back into an object of type T.
-        /// </summary>
-        /// <typeparam name="T">The type of the object to deserialize.</typeparam>
-        /// <param name="data">The JSON string containing the serialized data.</param>
-        /// <returns>The deserialized object of type T.</returns>
+        /// <summary>Deserializes a JSON string back into an instance of <typeparamref name="T"/>.</summary>
+        /// <exception cref="ArgumentNullException">data is null or whitespace.</exception>
         public T Deserialize<T>(string data)
         {
             if (string.IsNullOrWhiteSpace(data)) throw new ArgumentNullException(nameof(data), "The data to deserialize is null or empty.");

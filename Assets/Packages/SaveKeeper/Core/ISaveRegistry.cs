@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace ThanhDV.SaveKeeper.Core
 {
     /// <summary>
-    /// Tracks <see cref="ISavable"/> instances. The default <see cref="SaveRegistry"/> covers most cases;
-    /// DI users may bind a custom implementation.
+    /// Tracks <see cref="ISavable"/> instances for a SaveKeeper. The default <see cref="SaveRegistry"/>
+    /// covers most cases; DI users may bind a custom implementation.
     /// </summary>
     public interface ISaveRegistry
     {

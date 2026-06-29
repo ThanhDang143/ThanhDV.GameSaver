@@ -8,22 +8,18 @@ namespace ThanhDV.SaveKeeper.AutoSave
 {
     /// <summary>
     /// Static PlayerLoop-driven dispatcher that ticks every active <see cref="SKAutoSave"/> each Update frame.
-    /// Uses no MonoBehaviour or GameObject — keeps the library out of the scene tree.
+    /// No MonoBehaviour/GameObject — keeps the library out of the scene tree.
     /// </summary>
     internal static class AutoSaveTicker
     {
-        /// <summary>
-        /// Marker type used to identify our subsystem inside PlayerLoop's tree.
-        /// </summary>
+        /// <summary>Marker type identifying our subsystem in the PlayerLoop tree.</summary>
         private struct AutoSaveTickerMarker { }
 
         private static readonly List<SKAutoSave> _subscribers = new();
         private static readonly object _lock = new();
         private static bool _installed;
 
-        /// <summary>
-        /// Registers a service for per-frame ticks. Installs the PlayerLoop hook on the first subscriber.
-        /// </summary>
+        /// <summary>Registers a service for per-frame ticks. Installs the PlayerLoop hook on first subscriber.</summary>
         public static void Subscribe(SKAutoSave service)
         {
             lock (_lock)
@@ -40,9 +36,7 @@ namespace ThanhDV.SaveKeeper.AutoSave
             }
         }
 
-        /// <summary>
-        /// Unregisters a service. Removes the PlayerLoop hook when the last subscriber leaves.
-        /// </summary>
+        /// <summary>Unregisters a service. Removes the PlayerLoop hook when the last subscriber leaves.</summary>
         public static void Unsubscribe(SKAutoSave service)
         {
             lock (_lock)
@@ -58,8 +52,8 @@ namespace ThanhDV.SaveKeeper.AutoSave
         }
 
         /// <summary>
-        /// Invoked by Unity's PlayerLoop every Update frame. Snapshots subscribers outside the lock so
-        /// Tick callbacks may freely subscribe / unsubscribe without breaking the iteration.
+        /// PlayerLoop callback — invoked every Update frame. Snapshots subscribers outside the lock so
+        /// Tick callbacks may freely (un)subscribe without breaking iteration.
         /// </summary>
         private static void OnTick()
         {
@@ -73,9 +67,7 @@ namespace ThanhDV.SaveKeeper.AutoSave
             }
         }
 
-        /// <summary>
-        /// Injects our tick callback as a subsystem of Unity's Update phase. Idempotent.
-        /// </summary>
+        /// <summary>Injects the tick callback as a subsystem of Unity's Update phase. Idempotent.</summary>
         private static void InstallPlayerLoop()
         {
             PlayerLoopSystem rootLoop = PlayerLoop.GetCurrentPlayerLoop();
@@ -103,9 +95,7 @@ namespace ThanhDV.SaveKeeper.AutoSave
             PlayerLoop.SetPlayerLoop(rootLoop);
         }
 
-        /// <summary>
-        /// Removes our tick callback from Unity's Update phase.
-        /// </summary>
+        /// <summary>Removes the tick callback from Unity's Update phase.</summary>
         private static void UninstallPlayerLoop()
         {
             PlayerLoopSystem rootLoop = PlayerLoop.GetCurrentPlayerLoop();

@@ -8,15 +8,13 @@ using ThanhDV.SaveKeeper.Core;
 namespace ThanhDV.SaveKeeper.Infrastructure
 {
     /// <summary>
-    /// AES-256-CBC encryption with HMAC-SHA256 authentication (Encrypt-then-MAC pattern).
-    /// Provides both confidentiality (AES) and integrity (HMAC) — tampered ciphertext is rejected
-    /// at decrypt time rather than silently returning corrupt plaintext.
+    /// AES-256-CBC + HMAC-SHA256 (Encrypt-then-MAC). Provides confidentiality and integrity — tampered
+    /// ciphertext is rejected at decrypt time instead of silently returning corrupt plaintext.
     /// </summary>
     /// <remarks>
-    /// IMPORTANT: Do NOT change the master key after shipping. Saves encrypted with the previous
-    /// key cannot be decrypted by a new key — players will lose progress. The library does not
-    /// support key rotation by design: for client-side game saves, any attacker capable of
-    /// decompiling the binary already has the key, so rotation is security theater.
+    /// IMPORTANT: do NOT change the master key after shipping — old saves cannot be decrypted by a new key
+    /// and players lose progress. Key rotation is intentionally unsupported (for client-side saves, anyone
+    /// decompiling the binary already has the key — rotation is security theater).
     /// </remarks>
     public class AESProvider : IEncryptionProvider
     {
@@ -26,11 +24,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         private readonly KeyMaterial _material;
 
-        /// <summary>
-        /// Initializes an AES provider with a master key for encryption and authentication.
-        /// </summary>
-        /// <param name="masterKey">A secret key (16+ characters recommended; GUID format is suitable).</param>
-        /// <exception cref="ArgumentException">Thrown if the key is null, empty, or whitespace.</exception>
+        /// <param name="masterKey">Secret key for AES + HMAC. 16+ chars recommended (GUID format is fine).</param>
+        /// <exception cref="ArgumentException">key is null, empty, or whitespace.</exception>
         public AESProvider(string masterKey)
         {
             if (string.IsNullOrWhiteSpace(masterKey))
@@ -47,11 +42,9 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Encrypts and authenticates the specified plain text.
-        /// Output format: Base64( iv | ciphertext | hmac tag ).
+        /// Encrypts and authenticates. Returns the input unchanged when null/empty.
+        /// Output format: Base64( iv | ciphertext | hmac-tag ).
         /// </summary>
-        /// <param name="plainText">Text to encrypt. Returns unchanged if null or empty.</param>
-        /// <returns>Base64-encoded authenticated ciphertext.</returns>
         /// <exception cref="CryptographicException">Wraps any underlying encryption failure.</exception>
         public string Encrypt(string plainText)
         {
@@ -97,15 +90,10 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Decrypts and authenticates a Base64 string produced by <see cref="Encrypt"/>.
-        /// </summary>
-        /// <param name="cipherText">Base64-encoded ciphertext. Returns unchanged if null or empty.</param>
-        /// <returns>Original plain text.</returns>
+        /// <summary>Decrypts + authenticates a Base64 string produced by <see cref="Encrypt"/>.</summary>
         /// <exception cref="CryptographicException">
-        /// Thrown when the data is too short, the HMAC tag fails to verify (tamper or wrong key),
-        /// or any underlying decryption error occurs. Bad key and tampering are intentionally
-        /// indistinguishable — preventing oracle attacks.
+        /// Data too short, HMAC tag verification failed (tamper or wrong key), or any underlying decryption
+        /// error. Bad key and tampering are intentionally indistinguishable to prevent oracle attacks.
         /// </exception>
         public string Decrypt(string cipherText)
         {
@@ -162,8 +150,8 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         #region Helper
         /// <summary>
-        /// Derives a pair of independent 256-bit keys from the master key string.
-        /// Uses HMAC-SHA256 with distinct labels as a poor-man's KDF (HKDF not available on Mono).
+        /// Derives a pair of independent 256-bit keys from the master key.
+        /// Uses HMAC-SHA256 with distinct labels as a poor-man's KDF (HKDF isn't available on Mono).
         /// </summary>
         private static KeyMaterial DeriveKeyMaterial(string masterKey)
         {
@@ -175,18 +163,14 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return new KeyMaterial(enc, mac);
         }
 
-        /// <summary>
-        /// Computes HMAC-SHA256 over the given data with the given key.
-        /// </summary>
+        /// <summary>Computes HMAC-SHA256 over <paramref name="data"/> with <paramref name="key"/>.</summary>
         private static byte[] ComputeHmac(byte[] data, byte[] key)
         {
             using HMACSHA256 hmac = new(key);
             return hmac.ComputeHash(data);
         }
 
-        /// <summary>
-        /// Constant-time byte array comparison to prevent timing side-channel attacks on HMAC verification.
-        /// </summary>
+        /// <summary>Constant-time byte comparison — prevents timing side-channel attacks on HMAC verification.</summary>
         private static bool ConstantTimeEquals(byte[] a, byte[] b)
         {
             if (a == null || b == null) return false;
@@ -201,10 +185,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return diff == 0;
         }
 
-        /// <summary>
-        /// Pair of derived keys used per save: one for AES-CBC, one for HMAC-SHA256.
-        /// Both 32 bytes (256-bit) — derived from the master key via HMAC-based KDF.
-        /// </summary>
+        /// <summary>Derived key pair (256-bit each): one for AES-CBC, one for HMAC-SHA256.</summary>
         private readonly struct KeyMaterial
         {
             public readonly byte[] EncKey;

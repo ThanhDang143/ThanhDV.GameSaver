@@ -6,41 +6,28 @@ namespace ThanhDV.SaveKeeper.Core
     public enum SaveKeeperOperationStatus { Pending, Succeeded, Failed }
 
     /// <summary>
-    /// Tracks state, progress, and callbacks for typeless async operations.
-    /// Captures the SynchronizationContext to marshal callbacks back to their origin (typically Unity main thread),
-    /// ensuring callback code safely accesses Unity APIs even when running on threadpool.
+    /// Mutable backing store for a typeless async operation: status, progress, error, and callbacks.
+    /// Captures the SynchronizationContext at construction so completion callbacks fire on the origin thread
+    /// (typically Unity main thread), even when the pipeline finishes on a threadpool worker.
     /// </summary>
     internal class SaveKeeperOperationInternal
     {
-        /// <summary>
-        /// Current status of the operation.
-        /// </summary>
+        /// <summary>Current status of the operation.</summary>
         public SaveKeeperOperationStatus Status { get; set; } = SaveKeeperOperationStatus.Pending;
 
-        /// <summary>
-        /// Progress of the operation, ranging from 0.0 to 1.0.
-        /// </summary>
+        /// <summary>Progress from 0.0 to 1.0.</summary>
         public float PercentComplete { get; set; } = 0f;
 
-        /// <summary>
-        /// The exception that caused the operation to fail, if any.
-        /// </summary>
+        /// <summary>The exception that caused failure, if any.</summary>
         public Exception Error { get; set; }
 
-        /// <summary>
-        /// Indicates whether the operation has finished executing (either successfully or with an error).
-        /// </summary>
+        /// <summary>True once the operation has completed (succeeded or failed).</summary>
         public bool IsDone => Status != SaveKeeperOperationStatus.Pending;
 
-        /// <summary>
-        /// Event triggered when the operation completes. Passes a public handle to the listener.
-        /// </summary>
+        /// <summary>Raised on completion; passes a public read-only handle to listeners.</summary>
         public event Action<SaveKeeperOperationHandle> Completed;
 
-        /// <summary>
-        /// Action invoked by the C# async state machine to continue execution after an await.
-        /// Used internally by SaveKeeperAwaiter.
-        /// </summary>
+        /// <summary>Continuation invoked by the C# async state machine to resume after <c>await</c>.</summary>
         public event Action ContinuationAction;
 
         private readonly SynchronizationContext _capturedContext;
@@ -51,10 +38,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Finalizes the operation, updating its state and triggering all pending callbacks.
-        /// Idempotent — second and later calls are no-ops, preserving the original outcome.
+        /// Finalizes the operation and fires callbacks. Idempotent — later calls no-op, preserving the original outcome.
         /// </summary>
-        /// <param name="error">The exception to set if the operation failed. Null indicates success.</param>
+        /// <param name="error">Exception that caused failure, or null for success.</param>
         public void Complete(Exception error = null)
         {
             // Idempotent guard: the first call wins. Prevents state from being overwritten
@@ -87,46 +73,31 @@ namespace ThanhDV.SaveKeeper.Core
     }
 
     /// <summary>
-    /// Tracks state, progress, and callbacks for typed async operations.
-    /// Captures the SynchronizationContext to marshal callbacks back to their origin (typically Unity main thread),
-    /// ensuring callback code safely accesses Unity APIs even when running on threadpool.
+    /// Typed counterpart of <see cref="SaveKeeperOperationInternal"/> — adds a <see cref="Result"/> for the
+    /// operation's payload. Same SynchronizationContext-marshalled callback semantics.
     /// </summary>
     /// <typeparam name="T">The result type of the operation.</typeparam>
     internal class SaveKeeperOperationInternal<T>
     {
-        /// <summary>
-        /// Current status of the operation.
-        /// </summary>
+        /// <summary>Current status of the operation.</summary>
         public SaveKeeperOperationStatus Status { get; set; } = SaveKeeperOperationStatus.Pending;
 
-        /// <summary>
-        /// Progress of the operation, ranging from 0.0 to 1.0.
-        /// </summary>
+        /// <summary>Progress from 0.0 to 1.0.</summary>
         public float PercentComplete { get; set; } = 0f;
 
-        /// <summary>
-        /// The exception that caused the operation to fail, if any.
-        /// </summary>
+        /// <summary>The exception that caused failure, if any.</summary>
         public Exception Error { get; set; }
 
-        /// <summary>
-        /// The result of the operation upon successful completion.
-        /// </summary>
+        /// <summary>The result on successful completion.</summary>
         public T Result { get; set; }
 
-        /// <summary>
-        /// Indicates whether the operation has finished executing.
-        /// </summary>
+        /// <summary>True once the operation has completed.</summary>
         public bool IsDone => Status != SaveKeeperOperationStatus.Pending;
 
-        /// <summary>
-        /// Event triggered when the operation completes. Passes a public handle to the listener.
-        /// </summary>
+        /// <summary>Raised on completion; passes a public read-only handle to listeners.</summary>
         public event Action<SaveKeeperOperationHandle<T>> Completed;
 
-        /// <summary>
-        /// Action invoked by the C# async state machine to continue execution after an await.
-        /// </summary>
+        /// <summary>Continuation invoked by the C# async state machine to resume after <c>await</c>.</summary>
         public event Action ContinuationAction;
 
         private readonly SynchronizationContext _capturedContext;
@@ -137,11 +108,10 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Finalizes the operation, sets the result, and triggers all pending callbacks.
-        /// Idempotent — second and later calls are no-ops, preserving the original outcome.
+        /// Finalizes the operation with a result and fires callbacks. Idempotent — later calls no-op.
         /// </summary>
-        /// <param name="result">The result value of the operation.</param>
-        /// <param name="error">The exception to set if the operation failed. Null indicates success.</param>
+        /// <param name="result">The operation's result value.</param>
+        /// <param name="error">Exception that caused failure, or null for success.</param>
         public void Complete(T result, Exception error = null)
         {
             // Idempotent guard: the first call wins. Prevents state from being overwritten

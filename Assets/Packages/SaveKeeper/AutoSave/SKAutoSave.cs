@@ -6,11 +6,14 @@ using UnityEngine;
 namespace ThanhDV.SaveKeeper.AutoSave
 {
     /// <summary>
-    /// Optional auto-save service. Drives periodic implicit saves of the active profile and flushes pending saves on application quit (and on mobile focus loss).
+    /// Default <see cref="ISKAutoSave"/>. Drives periodic implicit saves of the active profile and flushes
+    /// pending saves on application quit (and on mobile focus loss).
     /// </summary>
     /// <remarks>
-    /// Construct with an <see cref="ISaveKeeper"/> and an <see cref="AutoSaveSettings"/> (built via <c>new AutoSaveSettings { ... }</c>), then call <see cref="Start"/>. Dispose before (or together with) the underlying SaveKeeper.
-    /// <para>Use ONE service per <see cref="ISaveKeeper"/>. Two services on the same keeper double-run the timer and quit-flush (wasteful, not corrupting). Multiple services on different keepers are independent and fine.</para>
+    /// Construct with an <see cref="ISaveKeeper"/> + <see cref="AutoSaveSettings"/>, then call <see cref="Start"/>.
+    /// Dispose before (or together with) the underlying SaveKeeper.
+    /// <para>Use ONE service per keeper. Two services on the same keeper double-run timers + quit-flush
+    /// (wasteful, not corrupting). Services on different keepers are independent.</para>
     /// </remarks>
     public class SKAutoSave : ISKAutoSave
     {
@@ -59,8 +62,8 @@ namespace ThanhDV.SaveKeeper.AutoSave
         #region Periodic tick
 
         /// <summary>
-        /// Countdown tick driven each frame by <see cref="AutoSaveTicker"/> (unscaled time, so it runs while paused).
-        /// Does nothing if auto-save is disabled or no profile is active.
+        /// Per-frame countdown driven by <see cref="AutoSaveTicker"/> in unscaled time (continues while paused).
+        /// No-op when auto-save is disabled or no profile is active.
         /// </summary>
         internal void Tick(float deltaTime)
         {
@@ -75,8 +78,8 @@ namespace ThanhDV.SaveKeeper.AutoSave
         }
 
         /// <summary>
-        /// Resets the countdown when the active profile was just saved — no need to auto-save it again soon.
-        /// Fires on the SaveKeeper's captured context (typically the main thread).
+        /// Resets the countdown after the active profile was saved (manual or auto) — avoids a duplicate auto-save
+        /// right after a manual one. Fires on the SaveKeeper's captured context (typically the main thread).
         /// </summary>
         private void OnSaveCompleted(string profileId)
         {
@@ -99,8 +102,8 @@ namespace ThanhDV.SaveKeeper.AutoSave
         }
 
         /// <summary>
-        /// On mobile, flushes pending saves when focus is lost (app going to background may be OS-killed).
-        /// Skipped on desktop where focus changes are transient (alt-tab, click outside).
+        /// Mobile only: flush pending saves when focus is lost (app may be OS-killed in background).
+        /// Skipped on desktop where focus loss is transient (alt-tab, click outside).
         /// </summary>
         private void OnFocusChanged(bool focused)
         {
@@ -112,9 +115,8 @@ namespace ThanhDV.SaveKeeper.AutoSave
         }
 
         /// <summary>
-        /// Drains in-flight async saves (bounded by AutoSaveOnQuitTimeout), then forces a final SaveImmediate.
-        /// Uses only the public ISaveKeeper API. Blocking here is safe: the save pipeline awaits with
-        /// ConfigureAwait(false), so it does not depend on the main thread to complete.
+        /// Drains in-flight async saves (capped by <see cref="AutoSaveSettings.AutoSaveOnQuitTimeout"/>),
+        /// then forces a final SaveImmediate. Blocking is safe because the pipeline uses ConfigureAwait(false).
         /// </summary>
         private void FlushOnExit()
         {

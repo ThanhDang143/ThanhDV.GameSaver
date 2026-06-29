@@ -358,6 +358,110 @@ namespace ThanhDV.SaveKeeper.Tests.Editor
             Assert.That(profiles, Is.EqualTo(new[] { "a", "b" }));
         }
 
+        #region ProfileExists / CreateProfile
+
+        [TestCase(null)]
+        [TestCase("")]
+        public void ProfileExists_NullOrEmpty_ReturnsFalse(string profileId)
+        {
+            Assert.That(_SaveKeeper.ProfileExists(profileId), Is.False);
+        }
+
+        [Test]
+        public void ProfileExists_NonExistentProfile_ReturnsFalse()
+        {
+            Assert.That(_SaveKeeper.ProfileExists("never-saved"), Is.False);
+        }
+
+        [Test]
+        public void ProfileExists_ExistingProfile_ReturnsTrue()
+        {
+            _storage.SetPrimaryFile("slot-1", SaveFileName, "any-data");
+
+            Assert.That(_SaveKeeper.ProfileExists("slot-1"), Is.True);
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        public void CreateProfile_NullOrEmptyProfile_ThrowsArgumentNullException(string profileId)
+        {
+            Assert.Throws<ArgumentNullException>(() => _SaveKeeper.CreateProfile(profileId));
+        }
+
+        [Test]
+        public void CreateProfile_FreshProfile_SetsCurrentProfileAndWritesInitialSave()
+        {
+            _SaveKeeper.CreateProfile("new-slot");
+
+            Assert.That(_SaveKeeper.CurrentProfileId, Is.EqualTo("new-slot"));
+            Assert.That(_storage.WriteImmediateCalls.Count(c => c.profileId == "new-slot"), Is.EqualTo(2),
+                "CreateProfile must write both .sav and .meta to disk for the new profile.");
+            Assert.That(_storage.DeleteProfileCalls, Is.Empty, "No delete should occur for a fresh profile.");
+        }
+
+        [Test]
+        public void CreateProfile_ExistingProfile_OverwriteFalse_Throws()
+        {
+            _storage.SetPrimaryFile("existing", SaveFileName, "old-data");
+
+            Assert.Throws<InvalidOperationException>(() => _SaveKeeper.CreateProfile("existing"));
+            Assert.That(_storage.DeleteProfileCalls, Is.Empty,
+                "Throw must happen BEFORE any destructive call — fail-loud semantics.");
+            Assert.That(_storage.WriteImmediateCalls, Is.Empty, "No save should be written on rejection.");
+        }
+
+        [Test]
+        public void CreateProfile_ExistingProfile_OverwriteTrue_DeletesThenRecreates()
+        {
+            _storage.SetPrimaryFile("existing", SaveFileName, "old-data");
+
+            _SaveKeeper.CreateProfile("existing", overwrite: true);
+
+            Assert.That(_storage.DeleteProfileCalls.Single(), Is.EqualTo("existing"),
+                "Old data must be deleted before the fresh save.");
+            Assert.That(_storage.WriteImmediateCalls.Count(c => c.profileId == "existing"), Is.EqualTo(2),
+                "New .sav and .meta must be written after the delete.");
+            Assert.That(_SaveKeeper.CurrentProfileId, Is.EqualTo("existing"));
+        }
+
+        [UnityTest]
+        public IEnumerator CreateProfile_ClearsInMemoryState_FromPriorLoad()
+        {
+            // Regression for the Wrinkle 1 design issue: after Load slot-A then CreateProfile slot-B,
+            // a freshly registered savable on slot-B must NOT inherit slot-A's data via OnSavableRegistered
+            // auto-restore. CreateProfile resets _curSaveData so the late-registered object stays initial.
+            SaveData loadedA = new();
+            loadedA.ObjectData["player"] = new TestSaveData { Value = 42 };
+            _storage.SetPrimaryFile("slot-A", SaveFileName, _serializer.RegisterSerializedValue(loadedA));
+
+            yield return WaitForOperation(_SaveKeeper.LoadAsync("slot-A"));
+            Assume.That(_SaveKeeper.CurrentProfileId, Is.EqualTo("slot-A"));
+
+            _SaveKeeper.CreateProfile("slot-B");
+
+            // Now register a fresh player on the new profile — must keep its initial state, NOT slot-A's.
+            TestSavable freshPlayer = new("player", null);
+            _registry.Register(freshPlayer);
+
+            Assert.That(freshPlayer.RestoreCallCount, Is.EqualTo(0),
+                "CreateProfile must clear the in-memory cache so newly registered savables don't pick up prior-profile data.");
+            Assert.That(_SaveKeeper.CurrentProfileId, Is.EqualTo("slot-B"));
+        }
+
+        [Test]
+        public void CreateProfile_ClearsSimpleDataDirtyFlag()
+        {
+            _SaveKeeper.SetSimple("coins", 100);
+            Assume.That(_SaveKeeper.IsSimpleDataDirty, Is.True, "Precondition: SetSimple must mark dirty.");
+
+            _SaveKeeper.CreateProfile("new-slot");
+
+            Assert.That(_SaveKeeper.IsSimpleDataDirty, Is.False,
+                "The initial save inside CreateProfile must clear the dirty flag.");
+        }
+
+        #endregion
+
         [Test]
         public void SetSimple_ThenGetSimple_ReturnsStoredValue()
         {

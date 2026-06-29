@@ -6,81 +6,41 @@ namespace ThanhDV.SaveKeeper.Core
 {
     public interface IStorageProvider
     {
-        /// <summary>
-        /// Asynchronously writes save data for the specified profile and file.
-        /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The target save file name.</param>
-        /// <param name="data">The serialized save data to write.</param>
-        /// <returns>A task that completes when the write operation finishes.</returns>
+        /// <summary>Asynchronously writes save data for the given profile/file.</summary>
         Task WriteAsync(string profileId, string fileName, string data);
 
-        /// <summary>
-        /// Immediately writes save data for the specified profile and file.
-        /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The target save file name.</param>
-        /// <param name="data">The serialized save data to write.</param>
+        /// <summary>Synchronously writes save data for the given profile/file.</summary>
         void WriteImmediate(string profileId, string fileName, string data);
 
-        /// <summary>
-        /// Restores the save data from its backup file, if available.
-        /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The target save file name to restore.</param>
+        /// <summary>Restores the save from its backup file, if available.</summary>
         void RestoreBackup(string profileId, string fileName);
 
-        /// <summary>
-        /// Asynchronously reads save data from the specified profile and file.
-        /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The save file name to read.</param>
-        /// <returns>A task that resolves to the serialized save data.</returns>
+        /// <summary>Asynchronously reads save data for the given profile/file.</summary>
         Task<string> ReadAsync(string profileId, string fileName);
 
-        /// <summary>
-        /// Asynchronously reads save data from the backup file.
-        /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The save file name to read.</param>
-        /// <returns>A task that resolves to the serialized save data.</returns>
+        /// <summary>Asynchronously reads save data from the backup file.</summary>
         Task<string> ReadBackupAsync(string profileId, string fileName);
 
-        /// <summary>
-        /// Deletes all save data associated with the specified profile.
-        /// </summary>
-        /// <param name="profileId">The profile identifier to remove.</param>
+        /// <summary>Deletes all data associated with the given profile.</summary>
         void DeleteProfile(string profileId);
 
-        /// <summary>
-        /// Determines whether the specified save file exists for a profile.
-        /// </summary>
-        /// <param name="profileId">The profile identifier to check.</param>
-        /// <param name="fileName">The save file name to look for.</param>
-        /// <returns><see langword="true"/> if the save file exists; otherwise, <see langword="false"/>.</returns>
+        /// <summary>Returns true if the file exists for the given profile.</summary>
         bool Exists(string profileId, string fileName);
 
         /// <summary>
-        /// Gets the file's last modified time in UTC, or null if it does not exist.
-        /// Used to detect stale metadata when a save succeeds but the related .meta write is interrupted.
+        /// Returns the file's last-modified UTC time, or null if missing. Used to detect stale metadata
+        /// when a save succeeds but the .meta write is interrupted.
         /// </summary>
-        /// <param name="profileId">The profile identifier that owns the save file.</param>
-        /// <param name="fileName">The target save file name to inspect.</param>
-        /// <returns>The file's last modified UTC time, or <see langword="null"/> if missing.</returns>
         DateTime? GetLastWriteTimeUtc(string profileId, string fileName);
 
-        /// <summary>
-        /// Gets all profile identifiers that currently have stored save data.
-        /// </summary>
-        /// <returns>An enumerable collection of available profile identifiers.</returns>
+        /// <summary>Returns all profile identifiers that currently have stored data.</summary>
         IEnumerable<string> GetAllProfileIds();
 
         /// <summary>
-        /// Gets the profile whose save file (or its backup, when the primary is missing) was written most recently.
+        /// Returns the profile whose save file (or backup, when primary is missing) was written most recently.
         /// Sidecar files (.meta) and transient files (.tmp) must NOT influence the result.
         /// </summary>
         /// <param name="fileName">The primary save file name to rank profiles by (e.g. "Default.sav").</param>
-        /// <returns>The most recent profile identifier, or <see langword="null"/> if none exists.</returns>
         string GetMostRecentProfileId(string fileName);
     }
 }

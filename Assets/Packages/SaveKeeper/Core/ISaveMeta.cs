@@ -3,18 +3,14 @@ using System;
 namespace ThanhDV.SaveKeeper.Core
 {
     /// <summary>
-    /// Defines the minimal metadata required to identify a save profile and record when it was last saved.
+    /// Minimal metadata for a save profile: id and last-saved timestamp.
     /// </summary>
     public interface ISaveMeta
     {
-        /// <summary>
-        /// Gets or sets the unique identifier of the save profile.
-        /// </summary>
+        /// <summary>Unique identifier of the save profile.</summary>
         string ProfileID { get; set; }
 
-        /// <summary>
-        /// Gets or sets the timestamp of the most recent successful save operation.
-        /// </summary>
+        /// <summary>UTC timestamp of the most recent successful save.</summary>
         DateTime LastTimeSaved { get; set; }
     }
 }

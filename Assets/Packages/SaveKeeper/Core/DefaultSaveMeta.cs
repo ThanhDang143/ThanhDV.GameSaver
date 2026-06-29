@@ -3,13 +3,12 @@ using System;
 namespace ThanhDV.SaveKeeper.Core
 {
     /// <summary>
-    /// Default <see cref="ISaveMeta"/> used when saving without custom metadata.
+    /// Fallback <see cref="ISaveMeta"/> used when a save call passes null metadata. Stores only ProfileID and
+    /// LastTimeSaved — slot UIs cannot display custom info (level name, playtime, etc.).
     /// </summary>
     /// <remarks>
-    /// Stores only library-managed fields: ProfileID and LastTimeSaved, so slot UI cannot show custom info such as level name or playtime.
-    /// <para>
-    /// Saving with null metadata replaces any existing custom metadata on disk. Pass a custom <see cref="ISaveMeta"/> on every save to keep rich slot info.
-    /// </para>
+    /// Saving with null metadata OVERWRITES any existing custom metadata on disk. Pass a custom
+    /// <see cref="ISaveMeta"/> on every save to preserve rich slot info.
     /// </remarks>
     [SaveDataAlias("DefaultMetadata")]
     public class DefaultSaveMeta : ISaveMeta

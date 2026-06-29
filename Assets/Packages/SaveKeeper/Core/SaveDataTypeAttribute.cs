@@ -3,20 +3,14 @@ using System;
 namespace ThanhDV.SaveKeeper.Core
 {
     /// <summary>
-    /// Assigns a stable alias to a type for serialization, protecting saves from breaking when the type is renamed or moved.
-    /// The alias is stored in the save file's $type field instead of the full type name.
-    /// Apply to ISaveData or ISaveMeta types when you want rename safety.
-    /// Without this attribute, Type.FullName is used as the alias.
+    /// Pins a stable alias to an <see cref="ISaveData"/>/<see cref="ISaveMeta"/> type so saves survive renames or moves.
+    /// The alias is written to the $type field instead of <c>Type.FullName</c>.
     /// </summary>
-    /// <remarks>
-    /// Aliases must be unique per project and cannot be changed after shipping — doing so breaks existing saves.
-    /// </remarks>
+    /// <remarks>Aliases must be unique per project and immutable after shipping — changing one breaks existing saves.</remarks>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false, AllowMultiple = false)]
     public sealed class SaveDataAliasAttribute : Attribute
     {
-        /// <summary>
-        /// Stable string identifier written into the serialized $type field for this type.
-        /// </summary>
+        /// <summary>Stable identifier written to the serialized $type field for this type.</summary>
         public string Alias { get; }
 
         /// <param name="alias">

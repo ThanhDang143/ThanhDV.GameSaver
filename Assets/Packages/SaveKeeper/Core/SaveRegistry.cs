@@ -5,28 +5,19 @@ using ThanhDV.SaveKeeper.Common;
 
 namespace ThanhDV.SaveKeeper.Core
 {
-    /// <summary>
-    /// Manages the registration and tracking of all <see cref="ISavable"/> objects in the game.
-    /// </summary>
+    /// <summary>Default <see cref="ISaveRegistry"/>: tracks live <see cref="ISavable"/> instances by SaveKey.</summary>
     public class SaveRegistry : ISaveRegistry
     {
-        /// <summary>
-        /// Primary storage keyed by <see cref="ISavable.SaveKey"/>.
-        /// </summary>
+        /// <summary>Primary storage keyed by <see cref="ISavable.SaveKey"/>.</summary>
         private readonly Dictionary<string, ISavable> _savables = new();
 
-        /// <summary>
-        /// Protects all access to _savables.
-        /// </summary>
+        /// <summary>Protects all access to <see cref="_savables"/>.</summary>
         private readonly object _lock = new();
 
         /// <summary>
-        /// Gets a fresh snapshot of registered <see cref="ISavable"/> instances.
+        /// Returns a fresh snapshot of registered savables, pruning dead references first.
+        /// Safe to iterate independently of later registry changes.
         /// </summary>
-        /// <remarks>
-        /// Dead references are pruned before the snapshot is created. The returned list is independent
-        /// of later registry changes, so callers can iterate it safely.
-        /// </remarks>
         public IReadOnlyList<ISavable> Savables
         {
             get
@@ -68,27 +59,19 @@ namespace ThanhDV.SaveKeeper.Core
             }
         }
 
-        /// <summary>
-        /// Event triggered when a new <see cref="ISavable"/> object is successfully registered.
-        /// </summary>
+        /// <summary>Raised after a savable is successfully registered.</summary>
         public event Action<ISavable> OnSavableRegistered;
 
-        /// <summary>
-        /// Event triggered when an <see cref="ISavable"/> object is successfully unregistered.
-        /// </summary>
+        /// <summary>Raised after a savable is successfully unregistered.</summary>
         public event Action<ISavable> OnSavableUnregistered;
 
         /// <summary>
-        /// Registers a valid <see cref="ISavable"/> by its <see cref="ISavable.SaveKey"/>.
+        /// Registers a savable by its <see cref="ISavable.SaveKey"/>.
+        /// Null/destroyed/empty-key savables and re-registration of the same instance are silently ignored;
+        /// dead entries sharing the key are auto-replaced with a warning.
         /// </summary>
         /// <param name="savable">The savable instance to register.</param>
-        /// <exception cref="DuplicateSaveKeyException">
-        /// Thrown when a different live savable already uses the same key.
-        /// </exception>
-        /// <remarks>
-        /// Re-registering the same instance is ignored. Null, destroyed, or empty-key savables are ignored.
-        /// Destroyed entries with the same key are replaced and logged.
-        /// </remarks>
+        /// <exception cref="DuplicateSaveKeyException">A different live savable already uses the same key.</exception>
         public void Register(ISavable savable)
         {
             if (IsDeadReference(savable)) return;
@@ -132,13 +115,9 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Removes a registered <see cref="ISavable"/>.
+        /// Removes a registered savable. Looks up by current <see cref="ISavable.SaveKey"/>;
+        /// falls back to reference lookup if the key changed (with a warning — SaveKey must be immutable).
         /// </summary>
-        /// <param name="savable">The savable instance to remove.</param>
-        /// <remarks>
-        /// Uses the current <see cref="ISavable.SaveKey"/> first. If the key changed after registration,
-        /// falls back to reference lookup, removes the entry, and logs a warning.
-        /// </remarks>
         public void Unregister(ISavable savable)
         {
             if (savable is null) return;
@@ -187,8 +166,8 @@ namespace ThanhDV.SaveKeeper.Core
         }
 
         /// <summary>
-        /// Returns true if the reference is null or a destroyed Unity object.
-        /// Used to detect dangling registry references when Unregister is not called in OnDestroy.
+        /// True if the reference is null or a destroyed Unity object — catches dangling entries when
+        /// the user forgets to Unregister in OnDestroy.
         /// </summary>
         private static bool IsDeadReference(ISavable savable)
         {

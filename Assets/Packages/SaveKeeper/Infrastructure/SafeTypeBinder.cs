@@ -11,21 +11,13 @@ using ThanhDV.SaveKeeper.Core;
 namespace ThanhDV.SaveKeeper.Infrastructure
 {
     /// <summary>
-    /// A safe <see cref="ISerializationBinder"/> for SaveKeeper's JSON serialization.
-    /// Replaces Newtonsoft's default behavior of writing assembly-qualified names — which is
-    /// vulnerable to type-injection attacks and brittle when classes are renamed — with a
-    /// whitelist of explicitly-registered short aliases.
+    /// Whitelist <see cref="ISerializationBinder"/> for SaveKeeper's JSON. Replaces Newtonsoft's default
+    /// assembly-qualified names (rename-brittle + RCE-vulnerable) with short, explicitly registered aliases.
     /// </summary>
     /// <remarks>
-    /// Behavior overview:
-    /// <list type="bullet">
-    /// <item>On serialize: writes a short stable alias into the $type field.</item>
-    /// <item>On deserialize: rejects any $type value that is not in the registered whitelist,
-    /// blocking remote-code-execution via gadget chains.</item>
-    /// </list>
-    /// Auto-discovery of ISaveData / ISaveMeta types is performed in the constructor (Step 3).
-    /// Manual <see cref="Register{T}"/> calls may be used to override or add entries before
-    /// any serialization happens.
+    /// Serialize: writes the registered alias into <c>$type</c>. Deserialize: rejects any <c>$type</c> not
+    /// in the whitelist — blocks RCE via gadget chains.
+    /// Auto-discovers types in the constructor; use <see cref="Register{T}"/> for assemblies loaded later.
     /// </remarks>
     public sealed class SafeTypeBinder : ISerializationBinder
     {
@@ -38,41 +30,34 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         private readonly object _lock = new();
 
         /// <summary>
-        /// Creates a SafeTypeBinder and auto-discovers all types in currently-loaded assemblies that
-        /// implement <see cref="ISaveData"/>, <see cref="ISaveMeta"/>, or carry a <see cref="SaveDataAliasAttribute"/>.
-        /// Each candidate is registered with its <see cref="SaveDataAliasAttribute.Alias"/> when present,
-        /// otherwise with its <c>Type.FullName</c>.
+        /// Auto-discovers every type in currently-loaded assemblies that implements <see cref="ISaveData"/>
+        /// or <see cref="ISaveMeta"/>, or carries <see cref="SaveDataAliasAttribute"/>.
+        /// Alias = attribute value when present, otherwise <c>Type.FullName</c>.
         /// </summary>
         /// <remarks>
-        /// Types loaded after construction (e.g., from AssetBundles) are NOT auto-discovered. Use
-        /// <see cref="Register{T}"/> to add them manually before any serialization occurs.
+        /// Types loaded later (AssetBundles, DLC) are NOT auto-discovered — call <see cref="Register{T}"/>
+        /// for them before serialization.
         /// </remarks>
         /// <exception cref="ArgumentException">
-        /// Thrown when two distinct types claim the same alias. Fix the conflict — either rename one
-        /// class, change one of the <see cref="SaveDataAliasAttribute"/> values, or move types to different
-        /// namespaces so their <c>FullName</c> differs.
+        /// Two distinct types claim the same alias — rename one, change a <see cref="SaveDataAliasAttribute"/>
+        /// value, or move types so their FullNames differ.
         /// </exception>
         public SafeTypeBinder()
         {
             ScanAssemblies();
         }
 
-        /// <summary>
-        /// Registers a type with the given alias. The alias is what appears in the save file's $type field at runtime.
-        /// </summary>
-        /// <typeparam name="T">The type to register.</typeparam>
-        /// <param name="alias">A stable alias for T. Must be unique across all registered types.</param>
+        /// <summary>Registers <typeparamref name="T"/> with the given alias (written to the <c>$type</c> field).</summary>
+        /// <param name="alias">Stable, unique alias for the type.</param>
         /// <exception cref="ArgumentException">
-        /// Thrown when alias is null or whitespace, when the alias is already bound to a different type, or when the type is already bound to a different alias.
+        /// Alias is null/whitespace, already bound to a different type, or this type already has a different alias.
         /// </exception>
         public void Register<T>(string alias)
         {
             Register(typeof(T), alias);
         }
 
-        /// <summary>
-        /// Used by the auto-scan path.
-        /// </summary>
+        /// <summary>Non-generic <see cref="Register{T}"/>. Idempotent for identical (type, alias) pairs.</summary>
         public void Register(Type type, string alias)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
@@ -98,9 +83,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             }
         }
 
-        /// <summary>
-        /// Returns true if the given alias has been registered.
-        /// </summary>
+        /// <summary>True if the given alias has been registered.</summary>
         public bool IsRegistered(string alias)
         {
             if (string.IsNullOrWhiteSpace(alias)) return false;
@@ -122,13 +105,12 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         #region Implementation
 
         /// <summary>
-        /// Converts a runtime type to its registered alias for JSON serialization.
+        /// Newtonsoft hook: converts a runtime <see cref="Type"/> to its registered alias for the <c>$type</c> field.
         /// </summary>
-        /// <param name="serializedType">The type to serialize.</param>
-        /// <param name="assemblyName">Always null (assemblies omitted for portability).</param>
-        /// <param name="typeName">Returns the registered alias.</param>
-        /// <exception cref="ArgumentNullException">When type is null.</exception>
-        /// <exception cref="JsonSerializationException">When type is not registered.</exception>
+        /// <param name="assemblyName">Always null — assemblies are omitted for portability.</param>
+        /// <param name="typeName">Output: the registered alias.</param>
+        /// <exception cref="ArgumentNullException">serializedType is null.</exception>
+        /// <exception cref="JsonSerializationException">The type is not registered.</exception>
         public void BindToName(Type serializedType, out string assemblyName, out string typeName)
         {
             if (serializedType == null) throw new ArgumentNullException(nameof(serializedType));
@@ -150,14 +132,12 @@ namespace ThanhDV.SaveKeeper.Infrastructure
         }
 
         /// <summary>
-        /// Converts a $type field back to a Type via whitelisted lookup.
-        /// Tries direct alias match first, then FullName for backward compatibility with old saves.
+        /// Newtonsoft hook: resolves a <c>$type</c> string back to a registered <see cref="Type"/>.
+        /// Tries the direct alias first, falls back to <c>Type.FullName</c> match for legacy saves.
         /// </summary>
         /// <param name="assemblyName">Ignored (legacy compatibility only).</param>
-        /// <param name="typeName">The type alias or FullName from $type.</param>
-        /// <returns>The registered Type.</returns>
-        /// <exception cref="ArgumentException">When typeName is null or empty.</exception>
-        /// <exception cref="JsonSerializationException">When type is not registered (security boundary).</exception>
+        /// <exception cref="ArgumentException">typeName is null or empty.</exception>
+        /// <exception cref="JsonSerializationException">The alias is not in the whitelist (security boundary).</exception>
         public Type BindToType(string assemblyName, string typeName)
         {
             if (string.IsNullOrEmpty(typeName))
@@ -196,9 +176,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
 
         #region Helper
 
-        /// <summary>
-        /// Walks every currently-loaded non-system assembly and registers every candidate type.
-        /// </summary>
+        /// <summary>Walks every loaded non-system assembly and registers each candidate type.</summary>
         private void ScanAssemblies()
         {
             const long SLOW_SCAN_THRESHOLD_MS = 100;
@@ -267,9 +245,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
                 || name.StartsWith("nunit", StringComparison.Ordinal);
         }
 
-        /// <summary>
-        /// A type is a candidate iff it is concrete and either implements ISaveData / ISaveMeta or carries [SaveDataAlias].
-        /// </summary>
+        /// <summary>Concrete + implements <see cref="ISaveData"/>/<see cref="ISaveMeta"/> or carries <see cref="SaveDataAliasAttribute"/>.</summary>
         private static bool IsCandidate(Type type)
         {
             if (type.IsAbstract) return false;
@@ -283,9 +259,7 @@ namespace ThanhDV.SaveKeeper.Infrastructure
             return implementsSavable || hasAttribute;
         }
 
-        /// <summary>
-        /// Returns the alias declared by [SaveDataAlias] if present, otherwise <c>Type.FullName</c>.
-        /// </summary>
+        /// <summary>Returns the alias from <see cref="SaveDataAliasAttribute"/> if present, else <c>Type.FullName</c>.</summary>
         private static string ResolveAlias(Type type)
         {
             SaveDataAliasAttribute attr = type.GetCustomAttribute<SaveDataAliasAttribute>();

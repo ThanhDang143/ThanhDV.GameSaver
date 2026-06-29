@@ -4,9 +4,7 @@ namespace System.Runtime.CompilerServices { internal static class IsExternalInit
 
 namespace ThanhDV.SaveKeeper.Core
 {
-    /// <summary>
-    /// Project-wide configuration for SaveKeeper.
-    /// </summary>
+    /// <summary>Configuration for a SaveKeeper instance: encryption toggle and file naming.</summary>
     public class SaveSettings
     {
         public bool UseEncryption { get; init; } = true;
