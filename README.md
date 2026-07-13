@@ -1,39 +1,72 @@
 # SaveKeeper
 
-A lightweight save system for Unity featuring:
-
-- Feature 1
-- Feature 2
-- ...
-
----
+A lightweight JSON save system for Unity.
 
 ## Installation
 
-### Unity Package Manager (via Git URL)
+### Unity Package Manager
 
-```
-https://github.com/ThanhDang143/ThanhDV.SaveKeeper.git?path=/Assets/Packages/SaveKeeper
-```
-
-1. In Unity, open **Window** → **Package Manager**.
-2. Click the **+** button and select "**Add package from git URL...**"
-3. Paste the URL above and click **Add**.
+    https://github.com/ThanhDang143/ThanhDV.SaveKeeper.git?path=/Assets/Packages/SaveKeeper
 
 ### Scoped Registry
 
-1. In Unity, open **Project Settings** → **Package Manager** → **Add New Scoped Registry**
+- Name: ThanhDV
+- URL: https://upm.thanhdv.com
+- Scope: thanhdv
+- Package: thanhdv.savekeeper
 
-- `Name` ThanhDV
-- `URL` https://upm.thanhdv.com
-- `Scope(s)` thanhdv
+## Public API
 
-2. In Unity, open **Window** → **Package Manager**.
+Namespace: ThanhDV.SaveKeeper.Core
 
-- Press the **+** button, choose "**Add package by name...**" → `thanhdv.savekeeper`
-- or
-- Press the **Packages** button, choose "**My Registries**"
+### SaveKeeper
+```
+    public event Action<string> OnSaveCompleted;
 
----
+    public bool IsSimpleDataDirty { get; }
+    public string CurrentProfileId { get; }
 
-## How to Use
+    public SaveKeeper(
+        ISaveRegistry registry,
+        IStorageProvider storageProvider,
+        ISerializer serializer,
+        IEncryptionProvider encryptionProvider,
+        SaveSettings settings);
+
+    public SaveKeeperOperationHandle<List<T>> GetAllMetadataAsync<T>()
+        where T : class, ISaveMeta;
+
+    public string GetMostRecentProfileId();
+    public IEnumerable<string> GetAllProfiles();
+    public void DeleteProfile(string profileId);
+
+    public SaveKeeperOperationHandle SaveAsync(
+        string profileId = null,
+        ISaveMeta metadata = null);
+
+    public void SaveImmediate(
+        string profileId = null,
+        ISaveMeta metadata = null);
+
+    public void RestoreBackup(string profileId);
+
+    public SaveKeeperOperationHandle LoadAsync(
+        string profileId,
+        bool discardUnsavedChanges = false);
+
+    public SaveKeeperOperationHandle LoadBackupAsync(
+        string profileId,
+        bool discardUnsavedChanges = false);
+
+    public SaveKeeperOperationHandle LoadMostRecentAsync(
+        bool discardUnsavedChanges = false);
+
+    public Task WaitForPendingOperationsAsync();
+
+    public void SetSimple<T>(string key, T value);
+    public T GetSimple<T>(string key, T defaultValue = default);
+    public bool HasSimpleKey(string key);
+    public void DeleteSimple(string key);
+
+    public void Dispose();
+```
